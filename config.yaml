@@ -1,5 +1,5 @@
 exchange:
-  base_url: "https://api.binance.com"
+  base_url: "https://data-api.binance.vision"
   quote_asset: "USDT"
   symbols: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "LINKUSDT"]
   timeframes: ["15m", "1h", "4h"]
