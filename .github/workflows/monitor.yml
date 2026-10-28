@@ -1,0 +1,45 @@
+name: Dot Cripto Monitor
+
+on:
+  schedule:
+    # GitHub Actions pode atrasar execuções; não é monitorização em tempo real.
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dot-cripto-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run independent monitoring cycle
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GOPLUS_ENABLED: ${{ secrets.GOPLUS_ENABLED }}
+          GOPLUS_APP_KEY: ${{ secrets.GOPLUS_APP_KEY }}
+          GOPLUS_APP_SECRET: ${{ secrets.GOPLUS_APP_SECRET }}
+        run: python -m app.main
+      - name: Upload logs and alerts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dot-cripto-logs-${{ github.run_id }}
+          path: data/
+          if-no-files-found: warn
+          retention-days: 14
