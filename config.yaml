@@ -1,0 +1,29 @@
+exchange:
+  base_url: "https://api.binance.com"
+  quote_asset: "USDT"
+  symbols: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "LINKUSDT"]
+  timeframes: ["15m", "1h", "4h"]
+  candle_limit: 120
+  min_quote_volume_24h_usdt: 5000000
+  max_spread_pct: 0.25
+
+thresholds:
+  move_15m_pct: 1.8
+  move_1h_pct: 3.5
+  move_4h_pct: 6.0
+  relative_volume: 1.8
+  breakout_lookback: 20
+  rsi_oversold: 30
+  rsi_overbought: 70
+  atr_stop_multiple: 1.5
+  min_risk_reward: 1.5
+
+alerts:
+  telegram_enabled: true
+  cooldown_minutes: 60
+  log_file: "data/alerts.jsonl"
+
+security:
+  goplus_enabled: false
+  chain_id: "1"
+  token_addresses: []
