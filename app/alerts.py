@@ -1,5 +1,4 @@
 import json
-import os
 import re
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
@@ -9,6 +8,34 @@ import requests
 
 
 BRASILIA_TZ = timezone(timedelta(hours=-3))
+
+TIMEFRAME_LABELS = {
+    "1m": "1 minuto",
+    "3m": "3 minutos",
+    "5m": "5 minutos",
+    "15m": "15 minutos",
+    "30m": "30 minutos",
+    "1h": "1 hora",
+    "2h": "2 horas",
+    "4h": "4 horas",
+    "6h": "6 horas",
+    "12h": "12 horas",
+    "1d": "1 dia",
+    "1w": "1 semana",
+}
+
+REFERENCE_PATTERNS = {
+    "invalidation": re.compile(
+        r"(?:invalida(?:ç|c)[ãa]o(?:\s+indicativa)?|stop(?:\s+indicativo)?)\s*:\s*"
+        r"([-+]?\d+(?:[.,]\d+)?)",
+        re.IGNORECASE,
+    ),
+    "target": re.compile(
+        r"(?:objetivo(?:\s+ilustrativo)?|alvo(?:\s+ilustrativo)?)\s*:\s*"
+        r"([-+]?\d+(?:[.,]\d+)?)",
+        re.IGNORECASE,
+    ),
+}
 
 
 def emit_alert(cfg, alert):
@@ -40,7 +67,7 @@ def _number(value, decimals=2, signed=False):
     if value is None or value == "":
         return "N/D"
     try:
-        number = Decimal(str(value))
+        number = Decimal(str(value).replace(",", "."))
         if not number.is_finite():
             return "N/D"
         rendered = f"{number:,.{decimals}f}"
@@ -68,38 +95,66 @@ def _time_brasilia(value):
         return str(value)
 
 
-def _localize_reason(reason):
-    """Localize decimal notation inside explanatory text; leave words and values intact."""
-    if not reason:
-        return "Não informado"
+def _parse_decimal(value):
+    try:
+        return Decimal(str(value).replace(",", "."))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
 
-    def replace(match):
-        token = match.group(0)
-        try:
-            value = Decimal(token)
-            decimals = len(token.split(".", 1)[1]) if "." in token else 0
-            decimals = min(max(decimals, 1), 4)
-            return _number(value, decimals)
-        except InvalidOperation:
-            return token
 
-    return re.sub(r"(?<![A-Za-z0-9])[-+]?\d+\.\d+(?![A-Za-z0-9])", replace, str(reason))
+def _extract_reference(reason, pattern):
+    match = pattern.search(reason or "")
+    if not match:
+        return None
+    value = _parse_decimal(match.group(1))
+    if value is None or not value.is_finite():
+        return None
+    return value
+
+
+def _build_reasons(reason, rsi, relative_volume):
+    source = str(reason or "").strip()
+    source = REFERENCE_PATTERNS["invalidation"].sub("", source)
+    source = REFERENCE_PATTERNS["target"].sub("", source)
+    source = re.sub(r"\bRSI\s*[:=]\s*[-+]?\d+(?:[.,]\d+)?", "", source, flags=re.IGNORECASE)
+    source = re.sub(
+        r"(?:volume\s+relativo|vol(?:ume)?\s+rel)\s*[:=]\s*[-+]?\d+(?:[.,]\d+)?x?",
+        "",
+        source,
+        flags=re.IGNORECASE,
+    )
+    source = source.replace(";", ".")
+    source = re.sub(r"\bSMA\s*20\s*>\s*SMA\s*50\b", "SMA 20 acima da SMA 50", source, flags=re.IGNORECASE)
+    source = re.sub(r"\s+", " ", source).strip(" .;,-")
+    items = []
+    if source and source.lower() not in {"referência técnica, não recomendação", "referencia tecnica, nao recomendacao"}:
+        items.append(source.rstrip(".") + ".")
+    if rsi is not None:
+        items.append(f"RSI: {rsi}.")
+    if relative_volume is not None:
+        items.append(f"Volume relativo: {relative_volume}x.")
+    return items or ["Não informado."]
 
 
 def format_message(alert):
-    """Build a readable Telegram alert. Raw numeric values remain unchanged in JSONL."""
+    """Build the approved Telegram layout; raw alert values remain unchanged in JSONL."""
     agent = alert.get("agent") or "Agente não identificado"
     symbol = str(alert.get("symbol") or "N/D")
     if symbol.endswith("USDT") and "/" not in symbol:
         symbol = f"{symbol[:-4]}/USDT"
 
-    timeframe = alert.get("timeframe") or "N/D"
+    raw_timeframe = str(alert.get("timeframe") or "N/D")
+    timeframe = TIMEFRAME_LABELS.get(raw_timeframe.lower(), raw_timeframe)
     price = _number(alert.get("price"), 2)
     signal = alert.get("signal") or "Não informado"
-    reason = _localize_reason(alert.get("reason"))
+    rsi = _number(alert.get("rsi"), 1) if alert.get("rsi") is not None else None
+    relative_volume = _number(alert.get("relative_volume"), 2) if alert.get("relative_volume") is not None else None
+    reasons = _build_reasons(alert.get("reason"), rsi, relative_volume)
+
+    reason_source = str(alert.get("reason") or "")
+    invalidation = _extract_reference(reason_source, REFERENCE_PATTERNS["invalidation"])
+    target = _extract_reference(reason_source, REFERENCE_PATTERNS["target"])
     change = _number(alert.get("change_pct"), 3, signed=True)
-    relative_volume = _number(alert.get("relative_volume"), 2)
-    rsi = _number(alert.get("rsi"), 1)
     atr = _number(alert.get("atr"), 2)
     confidence = alert.get("confidence") or "Não calibrada"
     risk = alert.get(
@@ -108,18 +163,22 @@ def format_message(alert):
     )
     candle_time = _time_brasilia(alert.get("candle_time_utc"))
 
+    reason_lines = "\n".join(f"- {item}" for item in reasons)
+    reference_lines = [
+        f"- Invalidação: US$ {_number(invalidation, 2)}.",
+        f"- Objetivo ilustrativo: US$ {_number(target, 2)}.",
+        f"- Variação: {change}%.",
+        f"- ATR: {atr}.",
+    ]
+
     return (
-        f"DOT CRIPTO | {agent.upper()}\n\n"
+        f"DOT CRIPTO | {str(agent).upper()}\n\n"
         f"Ativo: {symbol}\n"
         f"Período: {timeframe}\n"
         f"Preço de referência: US$ {price}\n\n"
         f"SINAL: {str(signal).upper()}\n\n"
-        f"Motivos:\n{reason}\n\n"
-        f"Indicadores:\n"
-        f"- Variação: {change}%\n"
-        f"- Volume relativo: {relative_volume}x\n"
-        f"- RSI: {rsi}\n"
-        f"- ATR: {atr}\n\n"
+        f"Motivos:\n{reason_lines}\n\n"
+        f"Referências técnicas:\n{chr(10).join(reference_lines)}\n\n"
         f"CONFIANÇA: {confidence}.\n\n"
         f"RISCO: {risk}\n\n"
         f"Horário da coleta: {candle_time}.\n\n"
