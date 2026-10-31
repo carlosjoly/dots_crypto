@@ -12,7 +12,7 @@ class AlertFormattingTests(unittest.TestCase):
             "price": 2251.94,
             "signal": "configuração potencial de alta",
             "reason": (
-                "Tendência SMA20>SMA50, RSI=56.3; referência técnica, não recomendação. "
+                "Tendência SMA20>SMA50, RSI=56.3; volume relativo 1.19; referência técnica, não recomendação. "
                 "Invalidação indicativa: 2246.9495; objetivo ilustrativo: 2259.4258."
             ),
             "change_pct": 0.047,
@@ -32,6 +32,8 @@ class AlertFormattingTests(unittest.TestCase):
         self.assertIn("- Variação: +0,047%.", message)
         self.assertIn("- RSI: 56,3.", message)
         self.assertIn("- Volume relativo: 1,19x.", message)
+        self.assertEqual(message.count("Volume relativo:"), 1)
+        self.assertEqual(message.lower().count("volume relativo"), 1)
         self.assertIn("- ATR: 3,33.", message)
         self.assertIn("- Invalidação: US$ 2.246,95.", message)
         self.assertIn("- Objetivo ilustrativo: US$ 2.259,43.", message)
