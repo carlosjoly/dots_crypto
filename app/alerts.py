@@ -12,7 +12,7 @@ BRASILIA_TZ = timezone(timedelta(hours=-3))
 
 
 def emit_alert(cfg, alert):
-    root = Path(cfg[" _root".strip()])
+    root = Path(cfg["_root"])
     path = root / cfg["alerts"]["log_file"]
     path.parent.mkdir(parents=True, exist_ok=True)
     alert["created_at_utc"] = datetime.now(timezone.utc).isoformat()
