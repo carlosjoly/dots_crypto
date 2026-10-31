@@ -118,7 +118,7 @@ def _build_reasons(reason, rsi, relative_volume):
     source = REFERENCE_PATTERNS["target"].sub("", source)
     source = re.sub(r"\bRSI\s*[:=]\s*[-+]?\d+(?:[.,]\d+)?", "", source, flags=re.IGNORECASE)
     source = re.sub(
-        r"(?:volume\s+relativo|vol(?:ume)?\s+rel)\s*[:=]\s*[-+]?\d+(?:[.,]\d+)?x?",
+        r"(?:volume\s+relativo|vol(?:ume)?\s+rel)\s*(?:[:=]\s*)?[-+]?\d+(?:[.,]\d+)?x?",
         "",
         source,
         flags=re.IGNORECASE,
