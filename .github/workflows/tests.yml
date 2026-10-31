@@ -27,3 +27,5 @@ jobs:
         run: pip install -r requirements.txt
       - name: Test alert formatting
         run: python -m unittest discover -s tests -v
+      - name: Print Telegram message preview (no delivery)
+        run: python preview_alert.py
