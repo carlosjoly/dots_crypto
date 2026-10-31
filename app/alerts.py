@@ -10,30 +10,20 @@ import requests
 BRASILIA_TZ = timezone(timedelta(hours=-3))
 
 TIMEFRAME_LABELS = {
-    "1m": "1 minuto",
-    "3m": "3 minutos",
-    "5m": "5 minutos",
-    "15m": "15 minutos",
-    "30m": "30 minutos",
-    "1h": "1 hora",
-    "2h": "2 horas",
-    "4h": "4 horas",
-    "6h": "6 horas",
-    "12h": "12 horas",
-    "1d": "1 dia",
-    "1w": "1 semana",
+    "1m": "1 minuto", "3m": "3 minutos", "5m": "5 minutos",
+    "15m": "15 minutos", "30m": "30 minutos", "1h": "1 hora",
+    "2h": "2 horas", "4h": "4 horas", "6h": "6 horas",
+    "12h": "12 horas", "1d": "1 dia", "1w": "1 semana",
 }
 
 REFERENCE_PATTERNS = {
     "invalidation": re.compile(
         r"(?:invalida(?:ç|c)[ãa]o(?:\s+indicativa)?|stop(?:\s+indicativo)?)\s*:\s*"
-        r"([-+]?\d+(?:[.,]\d+)?)",
-        re.IGNORECASE,
+        r"([-+]?\d+(?:[.,]\d+)?)", re.IGNORECASE,
     ),
     "target": re.compile(
         r"(?:objetivo(?:\s+ilustrativo)?|alvo(?:\s+ilustrativo)?)\s*:\s*"
-        r"([-+]?\d+(?:[.,]\d+)?)",
-        re.IGNORECASE,
+        r"([-+]?\d+(?:[.,]\d+)?)", re.IGNORECASE,
     ),
 }
 
@@ -51,13 +41,8 @@ def emit_alert(cfg, alert):
         msg = format_message(alert)
         url = f"https://api.telegram.org/bot{env['telegram_bot_token']}/sendMessage"
         response = requests.post(
-            url,
-            json={
-                "chat_id": env["telegram_chat_id"],
-                "text": msg,
-                "disable_web_page_preview": True,
-            },
-            timeout=12,
+            url, json={"chat_id": env["telegram_chat_id"], "text": msg,
+                       "disable_web_page_preview": True}, timeout=12,
         )
         response.raise_for_status()
 
@@ -89,8 +74,7 @@ def _time_brasilia(value):
         parsed = datetime.fromisoformat(raw)
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
-        local = parsed.astimezone(BRASILIA_TZ)
-        return local.strftime("%d/%m/%Y às %H:%M:%S (UTC-3)")
+        return parsed.astimezone(BRASILIA_TZ).strftime("%d/%m/%Y às %H:%M:%S (UTC-3)")
     except (ValueError, TypeError, OverflowError):
         return str(value)
 
@@ -107,9 +91,7 @@ def _extract_reference(reason, pattern):
     if not match:
         return None
     value = _parse_decimal(match.group(1))
-    if value is None or not value.is_finite():
-        return None
-    return value
+    return value if value is not None and value.is_finite() else None
 
 
 def _build_reasons(reason, rsi, relative_volume):
@@ -119,23 +101,22 @@ def _build_reasons(reason, rsi, relative_volume):
     source = re.sub(r"\bRSI\s*[:=]\s*[-+]?\d+(?:[.,]\d+)?", "", source, flags=re.IGNORECASE)
     source = re.sub(
         r"(?:volume\s+relativo|vol(?:ume)?\s+rel)\s*(?:[:=]\s*)?[-+]?\d+(?:[.,]\d+)?x?",
-        "",
-        source,
-        flags=re.IGNORECASE,
+        "", source, flags=re.IGNORECASE,
     )
     source = re.sub(
         r"refer[eê]ncia t[eé]cnica,?\s*n[aã]o recomenda[cç][aã]o",
-        "",
-        source,
-        flags=re.IGNORECASE,
+        "", source, flags=re.IGNORECASE,
     )
     source = source.replace(";", ".")
-    source = re.sub(r"\bSMA\s*20\s*>\s*SMA\s*50\b", "SMA 20 acima da SMA 50", source, flags=re.IGNORECASE)
+    source = re.sub(r"\bSMA\s*20\s*>\s*SMA\s*50\b",
+                    "SMA 20 acima da SMA 50", source, flags=re.IGNORECASE)
+    # Remove conjunctions left behind after extracting repeated metrics.
+    source = re.sub(r"\bcom\s*(?=[,.;]|$)", "", source, flags=re.IGNORECASE)
     source = re.sub(r"\s+([,.;])", r"\1", source)
     source = re.sub(r"([,.;])\s*([,.;])+", r"\1", source)
     source = re.sub(r"\s+", " ", source).strip(" .;,-")
     items = []
-    if source and source.lower() not in {"referência técnica, não recomendação", "referencia tecnica, nao recomendacao"}:
+    if source:
         items.append(source.rstrip(".") + ".")
     if rsi is not None:
         items.append(f"RSI: {rsi}.")
@@ -145,7 +126,7 @@ def _build_reasons(reason, rsi, relative_volume):
 
 
 def format_message(alert):
-    """Build the approved Telegram layout; raw alert values remain unchanged in JSONL."""
+    """Format every active agent consistently; unavailable technical levels are omitted."""
     agent = alert.get("agent") or "Agente não identificado"
     symbol = str(alert.get("symbol") or "N/D")
     if symbol.endswith("USDT") and "/" not in symbol:
@@ -156,29 +137,34 @@ def format_message(alert):
     price = _number(alert.get("price"), 2)
     signal = alert.get("signal") or "Não informado"
     rsi = _number(alert.get("rsi"), 1) if alert.get("rsi") is not None else None
-    relative_volume = _number(alert.get("relative_volume"), 2) if alert.get("relative_volume") is not None else None
+    relative_volume = (_number(alert.get("relative_volume"), 2)
+                       if alert.get("relative_volume") is not None else None)
     reasons = _build_reasons(alert.get("reason"), rsi, relative_volume)
 
     reason_source = str(alert.get("reason") or "")
     invalidation = _extract_reference(reason_source, REFERENCE_PATTERNS["invalidation"])
     target = _extract_reference(reason_source, REFERENCE_PATTERNS["target"])
-    change = _number(alert.get("change_pct"), 3, signed=True)
-    atr = _number(alert.get("atr"), 2)
+    change_value = alert.get("change_pct")
+    atr_value = alert.get("atr")
     confidence = alert.get("confidence") or "Não calibrada"
-    risk = alert.get(
-        "risk_note",
-        "Sinal preliminar. Verifique custos, liquidez, spread e contexto de mercado.",
+    risk = alert.get("risk_note") or (
+        "Sinal preliminar. Verifique custos, liquidez, spread e contexto de mercado."
     )
     candle_time = _time_brasilia(alert.get("candle_time_utc"))
 
-    reason_lines = "\n".join(f"- {item}" for item in reasons)
-    reference_lines = [
-        f"- Invalidação: US$ {_number(invalidation, 2)}.",
-        f"- Objetivo ilustrativo: US$ {_number(target, 2)}.",
-        f"- Variação: {change}%.",
-        f"- ATR: {atr}.",
-    ]
+    reference_lines = []
+    if invalidation is not None:
+        reference_lines.append(f"- Invalidação: US$ {_number(invalidation, 2)}.")
+    if target is not None:
+        reference_lines.append(f"- Objetivo ilustrativo: US$ {_number(target, 2)}.")
+    if change_value is not None:
+        reference_lines.append(f"- Variação: {_number(change_value, 3, signed=True)}%.")
+    if atr_value is not None:
+        reference_lines.append(f"- ATR: {_number(atr_value, 2)}.")
+    if not reference_lines:
+        reference_lines.append("- Sem referências técnicas disponíveis.")
 
+    reason_lines = "\n".join(f"- {item}" for item in reasons)
     return (
         f"DOT CRIPTO | {str(agent).upper()}\n\n"
         f"Ativo: {symbol}\n"
