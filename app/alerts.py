@@ -123,8 +123,16 @@ def _build_reasons(reason, rsi, relative_volume):
         source,
         flags=re.IGNORECASE,
     )
+    source = re.sub(
+        r"refer[eê]ncia t[eé]cnica,?\s*n[aã]o recomenda[cç][aã]o",
+        "",
+        source,
+        flags=re.IGNORECASE,
+    )
     source = source.replace(";", ".")
     source = re.sub(r"\bSMA\s*20\s*>\s*SMA\s*50\b", "SMA 20 acima da SMA 50", source, flags=re.IGNORECASE)
+    source = re.sub(r"\s+([,.;])", r"\1", source)
+    source = re.sub(r"([,.;])\s*([,.;])+", r"\1", source)
     source = re.sub(r"\s+", " ", source).strip(" .;,-")
     items = []
     if source and source.lower() not in {"referência técnica, não recomendação", "referencia tecnica, nao recomendacao"}:
