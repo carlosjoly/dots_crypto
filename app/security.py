@@ -1,13 +1,51 @@
+import hashlib
+import time
+
 import requests
 
-def goplus_token_security(chain_id, token_address, app_key="", app_secret=""):
+
+GOPLUS_BASE = "https://api.gopluslabs.io/api/v1"
+
+
+def get_goplus_access_token(app_key, app_secret):
+    """Exchange GoPlus app credentials for a short-lived bearer access token."""
+    if not app_key or not app_secret:
+        raise ValueError("GoPlus exige app_key e app_secret juntos para autenticação.")
+    timestamp = str(int(time.time()))
+    signature = hashlib.sha1(
+        f"{app_key}{timestamp}{app_secret}".encode("utf-8")
+    ).hexdigest()
+    response = requests.post(
+        f"{GOPLUS_BASE}/token",
+        json={"app_key": app_key, "sign": signature, "time": int(timestamp)},
+        headers={"Accept": "application/json"},
+        timeout=15,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if str(payload.get("code", "")) != "1":
+        raise ValueError(f"GoPlus token error: {payload.get('message', 'unknown')}")
+    result = payload.get("result") or {}
+    token = result.get(" access_token") or result.get("access_token") or payload.get("access_token")
+    if not token:
+        raise ValueError("GoPlus não retornou access_token.")
+    return str(token)
+
+
+def goplus_token_security(chain_id, token_address, app_key="", app_secret="", access_token=None):
     """Fetch GoPlus EVM token security data; API failures must block approval."""
-    url = "https://api.gopluslabs.io/api/v1/token_security/" + str(chain_id)
+    if bool(app_key) != bool(app_secret):
+        raise ValueError("Configure GOPLUS_APP_KEY e GOPLUS_APP_SECRET em conjunto.")
     headers = {}
-    if app_key:
-        headers["Authorization"] = f"Bearer {app_key}"
+    if access_token:
+        headers["Authorization"] = f"Bearer {access_token}"
+    elif app_key and app_secret:
+        headers["Authorization"] = f"Bearer {get_goplus_access_token(app_key, app_secret)}"
     params = {"contract_addresses": token_address.lower()}
-    response = requests.get(url, params=params, headers=headers, timeout=15)
+    response = requests.get(
+        f"{GOPLUS_BASE}/token_security/{chain_id}",
+        params=params, headers=headers, timeout=15,
+    )
     response.raise_for_status()
     payload = response.json()
     if str(payload.get("code", "")) != "1":
@@ -19,6 +57,7 @@ def goplus_token_security(chain_id, token_address, app_key="", app_secret=""):
     if not isinstance(token, dict) or not token:
         raise ValueError("GoPlus returned no security record for this contract")
     return token
+
 
 def evaluate_launch_security(data, max_tax=0.05):
     """Fail-closed screening: unknown required fields never become a clean bill of health."""
@@ -96,6 +135,7 @@ def evaluate_launch_security(data, max_tax=0.05):
         if data.get(field) not in (None, ""):
             notes.append(f"{field}={data[field]}")
     return {"status": status, "flags": flags, "notes": notes}
+
 
 def summarize_evm_risks(data):
     """Backward-compatible summary for the existing optional GoPlus integration."""
