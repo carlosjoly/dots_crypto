@@ -1,9 +1,13 @@
 """Discovery and fail-closed screening of newly created EVM DEX pools."""
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 import json
 import logging
+import random
 from pathlib import Path
+import random
 import re
+import time
 
 import requests
 
@@ -12,6 +16,9 @@ from .security import get_goplus_access_token, goplus_token_security, evaluate_l
 log = logging.getLogger("dot_cripto.bot_f")
 GECKO_BASE = "https://api.geckoterminal.com/api/v2"
 TIMEOUT = 15
+REQUEST_INTERVAL_SECONDS = 6
+MAX_429_RETRIES = 3
+RETRY_JITTER_SECONDS = 1
 
 NETWORKS = {
     "eth": "1",
@@ -23,13 +30,54 @@ NETWORKS = {
     "avalanche": "43114",
 }
 
+def _retry_after_seconds(response):
+    """Parse Retry-After as delta seconds or an HTTP date."""
+    value = (getattr(response, "headers", {}) or {}).get("Retry-After")
+    if value is None:
+        return None
+    try:
+        return max(0.0, float(value))
+    except (TypeError, ValueError):
+        try:
+            retry_at = parsedate_to_datetime(str(value))
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=timezone.utc)
+            return max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+
 def _get_json(url, params=None):
-    response = requests.get(
-        url, params=params, headers={"Accept": "application/json"},
-        timeout=TIMEOUT,
-    )
-    response.raise_for_status()
-    return response.json()
+    """GET JSON with bounded retries for HTTP 429 responses only."""
+    for attempt in range(MAX_429_RETRIES + 1):
+        try:
+            response = requests.get(
+                url, params=params, headers={"Accept": "application/json"},
+                timeout=TIMEOUT,
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.HTTPError as exc:
+            response = exc.response
+            if getattr(response, "status_code", None) != 429 or attempt >= MAX_429_RETRIES:
+                raise
+            retry_after = _retry_after_seconds(response)
+            if retry_after is not None:
+                wait = retry_after
+                log.warning(
+                    "GeckoTerminal HTTP 429; respeitando Retry-After por %.2fs (tentativa %d/%d).",
+                    wait, attempt + 1, MAX_429_RETRIES,
+                )
+            else:
+                wait = REQUEST_INTERVAL_SECONDS * (2 ** attempt) + random.uniform(
+                    0, RETRY_JITTER_SECONDS
+                )
+                log.warning(
+                    "GeckoTerminal HTTP 429 sem Retry-After válido; backoff %.2fs (tentativa %d/%d).",
+                    wait, attempt + 1, MAX_429_RETRIES,
+                )
+            time.sleep(wait)
+    raise RuntimeError("GeckoTerminal: limite de tentativas HTTP 429 excedido.")
 
 def fetch_new_pools(network, page=1):
     """Fetch recent pools plus token and DEX relationships from GeckoTerminal."""
@@ -189,6 +237,9 @@ def scan_new_launches(cfg):
         except Exception:
             log.exception("Bot F: falha ao consultar GeckoTerminal para %s", network)
             continue
+        finally:
+            # Keep a fixed inter-network pause even when one network fails.
+            time.sleep(REQUEST_INTERVAL_SECONDS)
 
         for pool in pools:
             token = _select_token(pool, settings["quote_symbols"])
