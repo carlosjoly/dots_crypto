@@ -131,11 +131,13 @@ def _build_reasons(reason, rsi, relative_volume):
     )
     source = source.replace(";", ".")
     source = re.sub(r"\bSMA\s*20\s*>\s*SMA\s*50\b", "SMA 20 acima da SMA 50", source, flags=re.IGNORECASE)
+    # Remove conjunctions left behind after extracting repeated metrics.
+    source = re.sub(r"\bcom\s*(?=[,.;]|$)", "", source, flags=re.IGNORECASE)
     source = re.sub(r"\s+([,.;])", r"\1", source)
     source = re.sub(r"([,.;])\s*([,.;])+", r"\1", source)
     source = re.sub(r"\s+", " ", source).strip(" .;,-")
     items = []
-    if source and source.lower() not in {"referência técnica, não recomendação", "referencia tecnica, nao recomendacao"}:
+    if source:
         items.append(source.rstrip(".") + ".")
     if rsi is not None:
         items.append(f"RSI: {rsi}.")
@@ -165,9 +167,8 @@ def format_message(alert):
     change = _number(alert.get("change_pct"), 3, signed=True)
     atr = _number(alert.get("atr"), 2)
     confidence = alert.get("confidence") or "Não calibrada"
-    risk = alert.get(
-        "risk_note",
-        "Sinal preliminar. Verifique custos, liquidez, spread e contexto de mercado.",
+    risk = alert.get("risk_note") or (
+        "Sinal preliminar. Verifique custos, liquidez, spread e contexto de mercado."
     )
     candle_time = _time_brasilia(alert.get("candle_time_utc"))
 
