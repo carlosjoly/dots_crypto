@@ -198,6 +198,15 @@ def format_message(alert):
         extra_lines.append(f"Volume 24h: US$ {_number(alert['volume_24h_usd'], 2)}")
     if alert.get("goplus_status"):
         extra_lines.append(f"Triagem GoPlus: {alert['goplus_status']}")
+    social = alert.get("social_metrics")
+    if isinstance(social, dict):
+        extra_lines.extend([
+            f"Volume social: {_number(social.get('social_volume'), 0)} (variação {_number(social.get('volume_change_pct'), 2, signed=True)}%)",
+            f"Sentimento: {_number(social.get('sentiment_score'), 1)}/100 (mudança {_number(social.get('sentiment_change'), 1, signed=True)} pontos)",
+            f"Autores únicos: {_number(social.get('unique_authors'), 0)}",
+            f"Proporção estimada de bots: {_number(social.get('bot_ratio_pct'), 1)}%",
+            f"Fontes observadas: {', '.join(social.get('sources', [])) or 'N/D'}",
+        ])
 
     extra_section = ""
     if extra_lines:
