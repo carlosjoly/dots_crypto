@@ -2,9 +2,11 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from app.new_launches import _market_eligibility, _select_token, _load_seen, _save_seen, release_seen_token
+import requests
+
+from app.new_launches import _get_json, _market_eligibility, _select_token, _load_seen, _save_seen, release_seen_token
 from app.security import evaluate_launch_security, get_goplus_access_token
 import hashlib
 from app.alerts import format_message
@@ -140,6 +142,56 @@ class BotFScreeningTests(unittest.TestCase):
         self.assertEqual(mock_post.call_args.kwargs["json"], {
             "app_key": "app-key", "sign": expected, "time": 1700000000
         })
+
+    @patch("app.new_launches.time.sleep")
+    @patch("app.new_launches.requests.get")
+    def test_gecko_429_honors_retry_after_seconds(self, mock_get, mock_sleep):
+        throttled = Mock(status_code=429, headers={"Retry-After": "7"})
+        error = requests.exceptions.HTTPError("rate limited", response=throttled)
+        success = Mock()
+        success.raise_for_status.return_value = None
+        success.json.return_value = {"data": []}
+        mock_get.side_effect = [error, success]
+
+        self.assertEqual(_get_json("https://example.test"), {"data": []})
+        mock_sleep.assert_called_once_with(7.0)
+        self.assertEqual(mock_get.call_count, 2)
+
+    @patch("app.new_launches.random.uniform", return_value=0.5)
+    @patch("app.new_launches.time.sleep")
+    @patch("app.new_launches.requests.get")
+    def test_gecko_429_uses_exponential_backoff_and_jitter_without_header(
+        self, mock_get, mock_sleep, _mock_jitter
+    ):
+        throttled = Mock(status_code=429, headers={})
+        error = requests.exceptions.HTTPError("rate limited", response=throttled)
+        success = Mock()
+        success.raise_for_status.return_value = None
+        success.json.return_value = {"data": []}
+        mock_get.side_effect = [error, success]
+
+        self.assertEqual(_get_json("https://example.test"), {"data": []})
+        mock_sleep.assert_called_once_with(6.5)
+        self.assertEqual(mock_get.call_count, 2)
+
+    @patch("app.new_launches.random.uniform", return_value=0.25)
+    @patch("app.new_launches.time.sleep")
+    @patch("app.new_launches.requests.get")
+    def test_gecko_429_stops_after_three_retries(
+        self, mock_get, mock_sleep, _mock_jitter
+    ):
+        throttled = Mock(status_code=429, headers={})
+        error = requests.exceptions.HTTPError("rate limited", response=throttled)
+        mock_get.side_effect = [error, error, error, error]
+
+        with self.assertRaises(requests.exceptions.HTTPError):
+            _get_json("https://example.test")
+
+        self.assertEqual(mock_get.call_count, 4)
+        self.assertEqual(
+            [call.args[0] for call in mock_sleep.call_args_list],
+            [6.25, 12.25, 24.25],
+        )
 
     def test_seen_state_round_trip(self):
         with tempfile.TemporaryDirectory() as directory:
