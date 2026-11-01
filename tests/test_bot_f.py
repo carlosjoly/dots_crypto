@@ -5,7 +5,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app.new_launches import _market_eligibility, _select_token, _load_seen, _save_seen
-from app.security import evaluate_launch_security
+from app.security import evaluate_launch_security, get_goplus_access_token
+import hashlib
 from app.alerts import format_message
 
 
@@ -108,6 +109,21 @@ class BotFScreeningTests(unittest.TestCase):
         self.assertNotIn("Invalidação: US$ N/D", message)
         self.assertNotIn("Objetivo ilustrativo: US$ N/D", message)
         self.assertNotIn("\\\\n", message)
+
+    @patch("app.security.time.time", return_value=1700000000)
+    @patch("app.security.requests.post")
+    def test_goplus_auth_uses_official_signed_access_token_flow(self, mock_post, _mock_time):
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.raise_for_status.return_value = None
+        mock_post.return_value.json.return_value = {
+            "code": 1, "result": {"access_token": "temporary-token"}
+        }
+        token = get_goplus_access_token("app-key", "app-secret")
+        expected = hashlib.sha1(b"app-key1700000000app-secret").hexdigest()
+        self.assertEqual(token, "temporary-token")
+        self.assertEqual(mock_post.call_args.kwargs["json"], {
+            "app_key": "app-key", "sign": expected, "time": 1700000000
+        })
 
     def test_seen_state_round_trip(self):
         with tempfile.TemporaryDirectory() as directory:
