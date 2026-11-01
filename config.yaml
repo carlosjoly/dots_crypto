@@ -41,3 +41,18 @@ security:
   goplus_enabled: true
   chain_id: "1"
   token_addresses: []
+
+
+# Bot G remains disabled until a licensed social-data API and verified EVM
+# contract mapping are supplied. The gateway must return the normalized schema
+# documented in app/social_sentiment.py.
+social:
+  enabled: false
+  symbols: ["ETHUSDT", "BNBUSDT", "LINKUSDT"]
+  max_data_age_minutes: 90
+  min_source_count: 2
+  min_unique_authors: 25
+  max_bot_ratio_pct: 25
+  volume_surge_pct: 50
+  sentiment_shift_points: 8
+  contracts: {}

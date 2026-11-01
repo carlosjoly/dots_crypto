@@ -17,5 +17,7 @@ def load_config():
             or bool(cfg.get("security", {}).get("goplus_enabled", False)),
         "goplus_app_key": os.getenv("GOPLUS_APP_KEY", "").strip(),
         "goplus_app_secret": os.getenv("GOPLUS_APP_SECRET", "").strip(),
+        "social_api_url": os.getenv("SOCIAL_API_URL", "").strip(),
+        "social_api_key": os.getenv("SOCIAL_API_KEY", "").strip(),
     }
     return cfg
