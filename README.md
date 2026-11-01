@@ -11,13 +11,13 @@ Sistema **apenas de alertas** para apoiar decisões manuais de swing trade. Não
 - Integração inicial com GoPlus Token Security API para redes EVM, quando configurada.
 - Workflow do GitHub Actions para execução programada.
 - Registos em JSONL e tratamento de erros por agente.
-- Agentes de descoberta de lançamentos, inteligência social, fundamentalista, tokenomics e on-chain definidos como módulos de integração futura: **não emitem avaliações positivas sem fontes configuradas**.
+- Bot F: descoberta de pools recém-criados via GeckoTerminal, triagem fail-closed de contratos EVM via GoPlus e alertas informativos de candidatos à watchlist.
 
 ## Limitações importantes
 
 1. GitHub Actions não é um serviço de execução contínua nem garante horário exato; os agendamentos podem atrasar. O workflow executa ciclos programados.
 2. Os limiares incluídos são parâmetros iniciais de engenharia, não uma estratégia validada. Faça backtest e paper trading antes de confiar nos alertas.
-3. O exemplo de GoPlus é uma verificação complementar de token EVM. Não substitui auditoria, análise de liquidez, nem cobre automaticamente todas as redes. A integração Solana deve ser adicionada conforme o endpoint e esquema atual da API.
+3. O Bot F monitora pools DEX recentes nas redes EVM configuradas (Ethereum, Base, BNB Chain, Arbitrum, Polygon, Optimism e Avalanche). A descoberta de um pool não prova que o token foi criado naquele momento; registra a criação do pool indexado pelo GeckoTerminal.\n4. O Bot F só envia candidato à watchlist se os dados de mercado superarem os mínimos e os campos obrigatórios do GoPlus estiverem completos e sem alertas críticos. Dados ausentes, API indisponível ou contrato sem cobertura resultam em revisão/rejeição, nunca em aprovação automática.\n5. GoPlus é uma triagem automatizada, não auditoria nem garantia de segurança. Não detecta todos os golpes; liquidez pode ser removida, volume pode ser manipulado e preços podem sofrer slippage extremo. O Bot F não compra nem executa ordens.
 4. Os dados de mercado são recolhidos de endpoints públicos da Binance. Verifique disponibilidade/região e os termos aplicáveis.
 5. Alertas e pontuações não são garantias de lucro. A pontuação não deve ser tratada como probabilidade estatística enquanto não for calibrada com dados fora da amostra.
 
@@ -45,7 +45,7 @@ Variáveis de ambiente:
 - `TELEGRAM_BOT_TOKEN`: token fornecido pelo BotFather.
 - `TELEGRAM_CHAT_ID`: chat de destino.
 - `GOPLUS_APP_KEY` e `GOPLUS_APP_SECRET`: opcionais, se exigidos pelo plano/endpoint usado.
-- `GOPLUS_ENABLED`: `true` para ativar a verificação de segurança EVM.
+- `GOPLUS_ENABLED`: `true` para ativar a verificação de segurança EVM. O `config.yaml` habilita o Bot F por padrão; a triagem GoPlus continua obrigatória.
 
 Nunca use uma API key da Binance com permissão de negociação ou levantamento neste projeto. A coleta atual usa endpoints públicos.
 
@@ -66,10 +66,10 @@ Cada agente executa separadamente e erros são capturados individualmente. Parti
 - **C — Reversões:** procura condições preliminares, nunca assume que um extremo vai inverter.
 - **D — Rompimentos:** procura fecho além de máxima/mínima recente com volume.
 - **E — Swing trade:** confluência simples de tendência, RSI, volume e ATR.
-- **F — Novos lançamentos:** integração não ativada; requer fontes/listagens e validação por rede.
+- **F — Novos lançamentos:** GeckoTerminal + GoPlus EVM; filtros mínimos configuráveis de idade do pool, liquidez, volume e transações; deduplicação persistida por cache do GitHub Actions; alertas somente para candidatos aprovados na triagem obrigatória.
 - **G — Inteligência social:** integração não ativada; requer API social licenciada/configurada.
 - **H — Fundamentalista:** integração não ativada; exige fontes primárias verificáveis.
-- **I — Segurança/fraudes:** integração GoPlus EVM opcional; não deve ser a única barreira de segurança.
+- **I — Segurança/fraudes:** integração GoPlus EVM auxiliar; não deve ser a única barreira de segurança.
 - **J — Tokenomics:** integração não ativada; exige dados de oferta, desbloqueios e distribuição com fontes datadas.
 
 ## Próximas etapas obrigatórias antes de habilitar sinais como estratégia
