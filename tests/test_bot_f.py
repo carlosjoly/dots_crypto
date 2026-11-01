@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from app.new_launches import _market_eligibility, _select_token, _load_seen, _save_seen
 from app.security import evaluate_launch_security
+from app.alerts import format_message
 
 
 class BotFScreeningTests(unittest.TestCase):
@@ -78,6 +79,35 @@ class BotFScreeningTests(unittest.TestCase):
             "is_in_dex": "1", "buy_tax": "0.01", "sell_tax": "0.02",
         }
         self.assertEqual(evaluate_launch_security(data)["status"], "eligible_for_watchlist")
+
+    def test_bot_f_alert_layout_includes_contract_and_pool_without_fake_technical_levels(self):
+        alert = {
+            "agent": "Bot F — Novos lançamentos",
+            "symbol": "NEW",
+            "timeframe": "Lançamento DEX",
+            "price": 0.25,
+            "signal": "CANDIDATO A ANÁLISE — NÃO É RECOMENDAÇÃO",
+            "reason": "Pool recente detectado; liquidez observada e GoPlus sem alertas críticos.",
+            "confidence": "não calibrada",
+            "risk_note": "Triagem preliminar; exige análise manual.",
+            "candle_time_utc": "2026-10-31T18:00:00+00:00",
+            "chain_id": "8453",
+            "network": "base",
+            "token_address": "0x" + "a" * 40,
+            "pool_url": "https://www.geckoterminal.com/base/pools/0xpool",
+            "liquidity_usd": 50000,
+            "volume_24h_usd": 25000,
+            "goplus_status": "eligible_for_watchlist",
+        }
+        message = format_message(alert)
+        self.assertIn("CONTRATO", message.upper())
+        self.assertIn("0x" + "a" * 40, message)
+        self.assertIn("geckoterminal.com/base/pools/0xpool", message)
+        self.assertIn("Liquidez observada: US$ 50.000,00", message)
+        self.assertIn("Triagem GoPlus: eligible_for_watchlist", message)
+        self.assertNotIn("Invalidação: US$ N/D", message)
+        self.assertNotIn("Objetivo ilustrativo: US$ N/D", message)
+        self.assertNotIn("\\\\n", message)
 
     def test_seen_state_round_trip(self):
         with tempfile.TemporaryDirectory() as directory:
