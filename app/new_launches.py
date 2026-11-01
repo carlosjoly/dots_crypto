@@ -160,6 +160,7 @@ def scan_new_launches(cfg):
     seen = _load_seen(state_path)
     alerts = []
     examined = 0
+    checked_this_cycle = set()
 
     for network in settings["networks"]:
         chain_id = NETWORKS.get(network)
@@ -177,12 +178,13 @@ def scan_new_launches(cfg):
             if not token:
                 continue
             identity = f"{chain_id}:{token['address']}"
-            if identity in seen:
+            if identity in seen or identity in checked_this_cycle:
                 continue
             eligible, market_reason = _market_eligibility(pool, cfg, now)
             if not eligible:
                 continue
             examined += 1
+            checked_this_cycle.add(identity)
             if examined > int(settings["max_security_checks_per_cycle"]):
                 log.warning("Bot F: limite de verificações GoPlus por ciclo atingido.")
                 break
@@ -199,7 +201,8 @@ def scan_new_launches(cfg):
                 # Do not mark as seen: a later cycle may obtain a valid security response.
                 continue
 
-            seen.add(identity)
+            if assessment["status"] == "rejected":
+                seen.add(identity)
             if assessment["status"] != "eligible_for_watchlist":
                 log.info(
                     "Bot F rejeitado/revisão: %s %s — %s",
@@ -207,6 +210,7 @@ def scan_new_launches(cfg):
                 )
                 continue
 
+            seen.add(identity)
             created = _created_at(pool.get("created_at"))
             alerts.append({
                 "agent": "Bot F — Novos lançamentos",
@@ -235,6 +239,7 @@ def scan_new_launches(cfg):
                 "pool_created_at_utc": created.isoformat() if created else None,
                 "pool_url": f"https://www.geckoterminal.com/{network}/pools/{pool.get('pool_address')}",
                 "token_address": token["address"],
+                "network": network,
                 "chain_id": chain_id,
                 "liquidity_usd": _number(pool.get("liquidity_usd")),
                 "volume_24h_usd": _number(pool.get("volume_24h_usd")),
