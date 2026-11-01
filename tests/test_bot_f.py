@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from app.new_launches import _market_eligibility, _select_token, _load_seen, _save_seen
+from app.new_launches import _market_eligibility, _select_token, _load_seen, _save_seen, release_seen_token
 from app.security import evaluate_launch_security, get_goplus_access_token
 import hashlib
 from app.alerts import format_message
@@ -109,6 +109,22 @@ class BotFScreeningTests(unittest.TestCase):
         self.assertNotIn("Invalidação: US$ N/D", message)
         self.assertNotIn("Objetivo ilustrativo: US$ N/D", message)
         self.assertNotIn("\\\\n", message)
+
+    def test_failed_delivery_releases_token_from_seen_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "data"
+            path.mkdir()
+            state_file = path / "bot_f_seen.json"
+            identity = "8453:" + "0x" + "a" * 40
+            _save_seen(state_file, {identity})
+            cfg = {
+                "_root": directory,
+                "launches": {"seen_state_file": "data/bot_f_seen.json"},
+            }
+            release_seen_token(cfg, {
+                "chain_id": "8453", "token_address": "0x" + "a" * 40
+            })
+            self.assertEqual(_load_seen(state_file), set())
 
     @patch("app.security.time.time", return_value=1700000000)
     @patch("app.security.requests.post")
