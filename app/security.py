@@ -33,7 +33,6 @@ def evaluate_launch_security(data, max_tax=0.05):
         "cannot_buy": "restrição de compra sinalizada",
         "cannot_sell_all": "restrição de venda sinalizada",
         "is_blacklisted": "mecanismo de blacklist sinalizado",
-        "malicious_address": "endereço/contrato associado a atividade maliciosa",
     }
     for field, label in required_zero.items():
         value = data.get(field)
@@ -72,6 +71,7 @@ def evaluate_launch_security(data, max_tax=0.05):
         "transfer_pausable": "transferências podem ser pausadas",
         "is_proxy": "contrato proxy",
         "is_anti_whale": "restrição anti-whale",
+        "malicious_address": "endereço/contrato associado a atividade maliciosa",
     }
     for field, label in soft_flags.items():
         value = data.get(field)
