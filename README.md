@@ -44,7 +44,8 @@ Edite `config.yaml` para alterar pares, timeframes e limiares. O universo inicia
 Variáveis de ambiente:
 - `TELEGRAM_BOT_TOKEN`: token fornecido pelo BotFather.
 - `TELEGRAM_CHAT_ID`: chat de destino.
-- `GOPLUS_APP_KEY` e `GOPLUS_APP_SECRET`: opcionais, se exigidos pelo plano/endpoint usado.
+- `GOPLUS_APP_KEY` e `GOPLUS_APP_SECRET`: credenciais GoPlus, quando exigidas pelo endpoint/plano.
+- `SOCIAL_API_URL` e `SOCIAL_API_KEY`: endpoint e chave do provedor/gateway social licenciado para o Bot G.
 - `GOPLUS_ENABLED`: `true` para ativar a verificação de segurança EVM. O `config.yaml` habilita o Bot F por padrão; a triagem GoPlus continua obrigatória.
 
 Nunca use uma API key da Binance com permissão de negociação ou levantamento neste projeto. A coleta atual usa endpoints públicos.
@@ -67,7 +68,7 @@ Cada agente executa separadamente e erros são capturados individualmente. Parti
 - **D — Rompimentos:** procura fecho além de máxima/mínima recente com volume.
 - **E — Swing trade:** confluência simples de tendência, RSI, volume e ATR.
 - **F — Novos lançamentos:** GeckoTerminal + GoPlus EVM; filtros mínimos configuráveis de idade do pool, liquidez, volume e transações; deduplicação persistida por cache do GitHub Actions; alertas somente para candidatos aprovados na triagem obrigatória.
-- **G — Inteligência social:** integração não ativada; requer API social licenciada/configurada.
+- **G — Sentimento & Volume Social:** adaptador modular para gateway de dados sociais licenciado; mede variação de volume, mudança de sentimento, autores únicos, diversidade de fontes e proporção estimada de bots. Exige timestamp recente e triagem GoPlus EVM aprovada antes de alertar. Permanece desativado até credenciais e contratos verificados serem configurados.
 - **H — Fundamentalista:** integração não ativada; exige fontes primárias verificáveis.
 - **I — Segurança/fraudes:** integração GoPlus EVM auxiliar; não deve ser a única barreira de segurança.
 - **J — Tokenomics:** integração não ativada; exige dados de oferta, desbloqueios e distribuição com fontes datadas.
@@ -91,6 +92,7 @@ app/
   indicators.py
   alerts.py
   security.py
+  social_sentiment.py
   agents.py
   logging_setup.py
 config.yaml
