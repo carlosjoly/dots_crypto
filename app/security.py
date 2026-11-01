@@ -26,7 +26,7 @@ def get_goplus_access_token(app_key, app_secret):
     if str(payload.get("code", "")) != "1":
         raise ValueError(f"GoPlus token error: {payload.get('message', 'unknown')}")
     result = payload.get("result") or {}
-    token = result.get(" access_token") or result.get("access_token") or payload.get("access_token")
+    token = result.get("access_token") or payload.get("access_token")
     if not token:
         raise ValueError("GoPlus não retornou access_token.")
     return str(token)
