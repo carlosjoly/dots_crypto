@@ -172,12 +172,35 @@ def format_message(alert):
     candle_time = _time_brasilia(alert.get("candle_time_utc"))
 
     reason_lines = "\n".join(f"- {item}" for item in reasons)
-    reference_lines = [
-        f"- Invalidação: US$ {_number(invalidation, 2)}.",
-        f"- Objetivo ilustrativo: US$ {_number(target, 2)}.",
-        f"- Variação: {change}%.",
-        f"- ATR: {atr}.",
-    ]
+    reference_lines = []
+    if invalidation is not None:
+        reference_lines.append(f"- Invalidação: US$ {_number(invalidation, 2)}.")
+    if target is not None:
+        reference_lines.append(f"- Objetivo ilustrativo: US$ {_number(target, 2)}.")
+    if alert.get("change_pct") is not None:
+        reference_lines.append(f"- Variação: {change}%.")
+    if alert.get("atr") is not None:
+        reference_lines.append(f"- ATR: {atr}.")
+    if not reference_lines:
+        reference_lines.append("- Não aplicável ou não informado.")
+
+    extra_lines = []
+    if alert.get("chain_id"):
+        extra_lines.append(f"Rede/Chain ID: {alert.get('network', 'EVM')} / {alert['chain_id']}")
+    if alert.get("token_address"):
+        extra_lines.append(f"Contrato: {alert['token_address']}")
+    if alert.get("pool_url"):
+        extra_lines.append(f"Pool: {alert['pool_url']}")
+    if alert.get("liquidity_usd") is not None:
+        extra_lines.append(f"Liquidez observada: US$ {_number(alert['liquidity_usd'], 2)}")
+    if alert.get("volume_24h_usd") is not None:
+        extra_lines.append(f"Volume 24h: US$ {_number(alert['volume_24h_usd'], 2)}")
+    if alert.get("goplus_status"):
+        extra_lines.append(f"Triagem GoPlus: {alert['goplus_status']}")
+
+    extra_section = ""
+    if extra_lines:
+        extra_section = "\n\nDados do lançamento:\n" + "\n".join(f"- {line}" for line in extra_lines)
 
     return (
         f"DOT CRIPTO | {str(agent).upper()}\n\n"
@@ -186,7 +209,8 @@ def format_message(alert):
         f"Preço de referência: US$ {price}\n\n"
         f"SINAL: {str(signal).upper()}\n\n"
         f"Motivos:\n{reason_lines}\n\n"
-        f"Referências técnicas:\n{chr(10).join(reference_lines)}\n\n"
+        f"Referências técnicas:\n{chr(10).join(reference_lines)}"
+        f"{extra_section}\n\n"
         f"CONFIANÇA: {confidence}.\n\n"
         f"RISCO: {risk}\n\n"
         f"Horário da coleta: {candle_time}.\n\n"

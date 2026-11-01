@@ -23,7 +23,21 @@ alerts:
   cooldown_minutes: 60
   log_file: "data/alerts.jsonl"
 
+launches:
+  enabled: true
+  provider: "GeckoTerminal"
+  networks: ["eth", "base", "bsc", "arbitrum", "polygon_pos", "optimism", "avalanche"]
+  min_pool_age_minutes: 5
+  max_pool_age_hours: 48
+  min_liquidity_usd: 25000
+  min_volume_24h_usd: 10000
+  min_txns_24h: 50
+  max_security_checks_per_cycle: 15
+  max_buy_sell_tax: 0.05
+  quote_symbols: ["USDC", "USDT", "WETH", "WBNB", "DAI", "USDBC", "USDE"]
+  seen_state_file: "data/bot_f_seen.json"
+
 security:
-  goplus_enabled: false
+  goplus_enabled: true
   chain_id: "1"
   token_addresses: []

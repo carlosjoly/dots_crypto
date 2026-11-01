@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "fix/padrao-mensagens-telegram"
+      - "feature/bot-f-new-launches-goplus"
   pull_request:
     branches:
       - main
@@ -25,7 +26,7 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Test alert formatting
+      - name: Test all modules
         run: python -m unittest discover -s tests -v
       - name: Print Telegram message preview (no delivery)
         run: python preview_alert.py

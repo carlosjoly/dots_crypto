@@ -25,6 +25,13 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+      - name: Restore Bot F deduplication state
+        uses: actions/cache@v4
+        with:
+          path: data/bot_f_seen.json
+          key: bot-f-seen-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            bot-f-seen-${{ runner.os }}-${{ github.ref_name }}-
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Run independent monitoring cycle

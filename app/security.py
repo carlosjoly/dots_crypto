@@ -1,42 +1,143 @@
+import hashlib
+import time
+
 import requests
 
-def goplus_token_security(chain_id, token_address, app_key="", app_secret=""):
-    # Endpoint de segurança de token EVM. Confirme o esquema e os requisitos
-    # de autenticação vigentes na documentação oficial antes de produção.
-    url = "https://api.gopluslabs.io/api/v1/token_security/" + str(chain_id)
+
+GOPLUS_BASE = "https://api.gopluslabs.io/api/v1"
+
+
+def get_goplus_access_token(app_key, app_secret):
+    """Exchange GoPlus app credentials for a short-lived bearer access token."""
+    if not app_key or not app_secret:
+        raise ValueError("GoPlus exige app_key e app_secret juntos para autenticação.")
+    timestamp = str(int(time.time()))
+    signature = hashlib.sha1(
+        f"{app_key}{timestamp}{app_secret}".encode("utf-8")
+    ).hexdigest()
+    response = requests.post(
+        f"{GOPLUS_BASE}/token",
+        json={"app_key": app_key, "sign": signature, "time": int(timestamp)},
+        headers={"Accept": "application/json"},
+        timeout=15,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if str(payload.get("code", "")) != "1":
+        raise ValueError(f"GoPlus token error: {payload.get('message', 'unknown')}")
+    result = payload.get("result") or {}
+    token = result.get("access_token") or payload.get("access_token")
+    if not token:
+        raise ValueError("GoPlus não retornou access_token.")
+    return str(token)
+
+
+def goplus_token_security(chain_id, token_address, app_key="", app_secret="", access_token=None):
+    """Fetch GoPlus EVM token security data; API failures must block approval."""
+    if bool(app_key) != bool(app_secret):
+        raise ValueError("Configure GOPLUS_APP_KEY e GOPLUS_APP_SECRET em conjunto.")
     headers = {}
-    if app_key:
-        headers["Authorization"] = f"Bearer {app_key}"
-    params = {"contract_addresses": token_address}
-    r = requests.get(url, params=params, headers=headers, timeout=15)
-    r.raise_for_status()
-    payload = r.json()
-    if str(payload.get("code", "1")) not in ("1", "0"):
+    if access_token:
+        headers["Authorization"] = f"Bearer {access_token}"
+    elif app_key and app_secret:
+        headers["Authorization"] = f"Bearer {get_goplus_access_token(app_key, app_secret)}"
+    params = {"contract_addresses": token_address.lower()}
+    response = requests.get(
+        f"{GOPLUS_BASE}/token_security/{chain_id}",
+        params=params, headers=headers, timeout=15,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if str(payload.get("code", "")) != "1":
         raise ValueError(f"GoPlus API returned non-success: {payload.get('message', 'unknown')}")
-    result = payload.get("result", {})
-    return result.get(token_address.lower()) or result.get(token_address) or payload
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        raise ValueError("GoPlus response has no valid result object")
+    token = result.get(token_address.lower()) or result.get(token_address)
+    if not isinstance(token, dict) or not token:
+        raise ValueError("GoPlus returned no security record for this contract")
+    return token
+
+
+def evaluate_launch_security(data, max_tax=0.05):
+    """Fail-closed screening: unknown required fields never become a clean bill of health."""
+    if not isinstance(data, dict) or not data:
+        return {"status": "review_required", "flags": ["Resposta GoPlus ausente"], "notes": []}
+
+    blockers = []
+    review = []
+    notes = []
+    required_zero = {
+        "is_honeypot": "honeypot sinalizado",
+        "cannot_buy": "restrição de compra sinalizada",
+        "cannot_sell_all": "restrição de venda sinalizada",
+        "is_blacklisted": "mecanismo de blacklist sinalizado",
+    }
+    for field, label in required_zero.items():
+        value = data.get(field)
+        if value is None or str(value).strip() == "":
+            review.append(f"{field}: não informado pela GoPlus")
+        elif str(value).strip() == "1":
+            blockers.append(label)
+        elif str(value).strip() != "0":
+            review.append(f"{field}: valor não reconhecido")
+
+    if str(data.get("is_open_source", "")).strip() == "0":
+        blockers.append("contrato não verificado/open source")
+    elif str(data.get("is_open_source", "")).strip() != "1":
+        review.append("status de código-fonte não confirmado")
+
+    if str(data.get("is_in_dex", "")).strip() != "1":
+        review.append("GoPlus não confirmou negociação em DEX")
+
+    for field, label in (("buy_tax", "taxa de compra"), ("sell_tax", "taxa de venda")):
+        raw = data.get(field)
+        try:
+            tax = float(raw)
+            if tax < 0 or tax > 1:
+                raise ValueError()
+            if tax >= max_tax:
+                blockers.append(f"{label} igual ou superior a {max_tax:.0%}")
+        except (TypeError, ValueError):
+            review.append(f"{label}: desconhecida ou inválida")
+
+    soft_flags = {
+        "hidden_owner": "proprietário oculto",
+        "owner_change_balance": "proprietário pode alterar saldos",
+        "selfdestruct": "função self-destruct",
+        "is_mintable": "função de emissão adicional",
+        "can_take_back_ownership": "possibilidade de retomada de propriedade",
+        "transfer_pausable": "transferências podem ser pausadas",
+        "is_proxy": "contrato proxy",
+        "is_anti_whale": "restrição anti-whale",
+        "malicious_address": "endereço/contrato associado a atividade maliciosa",
+    }
+    for field, label in soft_flags.items():
+        value = data.get(field)
+        if value is None or str(value).strip() == "":
+            continue
+        if str(value).strip() == "1":
+            if field == "malicious_address":
+                blockers.append(label)
+            else:
+                review.append(label)
+
+    if blockers:
+        status = "rejected"
+        flags = blockers + review
+    elif review:
+        status = "review_required"
+        flags = review
+    else:
+        status = "eligible_for_watchlist"
+        flags = []
+    for field in ("holder_count", "lp_holder_count", "creator_percent", "owner_percent"):
+        if data.get(field) not in (None, ""):
+            notes.append(f"{field}={data[field]}")
+    return {"status": status, "flags": flags, "notes": notes}
+
 
 def summarize_evm_risks(data):
-    if not isinstance(data, dict):
-        return {"status": "unknown", "flags": ["Resposta inesperada da API"]}
-    flags = []
-    mapping = {
-        "is_honeypot": "risco de honeypot",
-        "cannot_sell_all": "restrição potencial de venda",
-        "owner_change_balance": "proprietário pode alterar saldos",
-        "hidden_owner": "proprietário oculto",
-        "selfdestruct": "função self-destruct sinalizada",
-        "is_proxy": "contrato proxy",
-        "is_mintable": "token potencialmente mintável",
-    }
-    for key, label in mapping.items():
-        if str(data.get(key, "0")) == "1":
-            flags.append(label)
-    for key, label in [("buy_tax", "imposto de compra elevado"), ("sell_tax", "imposto de venda elevado")]:
-        try:
-            if float(data.get(key, 0) or 0) >= 0.05:
-                flags.append(label)
-        except (TypeError, ValueError):
-            flags.append(f"{label}: dado não interpretável")
-    return {"status": "review_required" if flags else "no_flag_returned",
-            "flags": flags or ["Nenhuma flag nestes campos; isso não prova segurança"]}
+    """Backward-compatible summary for the existing optional GoPlus integration."""
+    assessment = evaluate_launch_security(data)
+    return {"status": assessment["status"], "flags": assessment["flags"]}

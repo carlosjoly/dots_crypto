@@ -60,14 +60,18 @@ def run_market_agents(symbol, tf, df, cfg):
                           f"Tendência SMA20<SMA50, RSI={r['rsi14']:.1f}; referência técnica, não recomendação. Invalidação indicativa: {stop:.8g}; objetivo ilustrativo: {target:.8g}."))
     return out
 
-def disabled_agent_status():
-    return [
-        {"agent": "Bot F — Novos lançamentos", "status": "disabled",
-         "reason": "Requer fonte de lançamentos/listagens e validação de rede; não emitir sinal sem integração."},
+def disabled_agent_status(cfg=None):
+    statuses = [
         {"agent": "Bot G — Inteligência social", "status": "disabled",
-         "reason": "Requer API social e verificação contra spam/bots; sem fonte configurada."},
+         "reason": "Requer API social licenciada e verificação contra spam/bots; sem fonte configurada."},
         {"agent": "Bot H — Fundamentalista", "status": "disabled",
          "reason": "Requer coleta de fontes primárias, atividade de desenvolvimento e evidências datadas."},
         {"agent": "Bot J — Tokenomics", "status": "disabled",
          "reason": "Requer dados confiáveis de oferta, distribuição e desbloqueios."},
     ]
+    if not cfg or not cfg.get("launches", {}).get("enabled", False) or not cfg.get("_env", {}).get("goplus_enabled", False):
+        statuses.insert(0, {
+            "agent": "Bot F — Novos lançamentos", "status": "disabled",
+            "reason": "Requer descoberta de pools habilitada e GoPlus ativo; sem aprovação não emite alertas.",
+        })
+    return statuses
