@@ -2,7 +2,7 @@ import logging
 from .config import load_config
 from .market_data import get_klines, get_24h_tickers, get_book_ticker
 from .agents import run_market_agents, disabled_agent_status
-from .new_launches import scan_new_launches
+from .new_launches import scan_new_launches, release_seen_token
 from .alerts import emit_alert
 from .logging_setup import setup_logging
 
@@ -55,9 +55,13 @@ def main():
         try:
             launch_alerts = scan_new_launches(cfg)
             for alert in launch_alerts:
-                emit_alert(cfg, alert)
-                sent += 1
-                log.info("Alerta: %s %s na rede %s", alert["agent"], alert["symbol"], alert["chain_id"])
+                try:
+                    emit_alert(cfg, alert)
+                    sent += 1
+                    log.info("Alerta: %s %s na rede %s", alert["agent"], alert["symbol"], alert["chain_id"])
+                except Exception:
+                    release_seen_token(cfg, alert)
+                    log.exception("Falha no envio do alerta Bot F; contrato será reavaliado no próximo ciclo: %s", alert.get("token_address"))
             log.info("Bot F concluído. Candidatos aprovados para watchlist=%d", len(launch_alerts))
         except Exception:
             log.exception("Bot F indisponível neste ciclo; nenhum candidato foi aprovado sem validação.")
