@@ -104,7 +104,7 @@ def _select_token(pool, quote_symbols):
         return None
     return {
         "address": address.lower(),
-        "symbol": str(selected.get("symbol") or "N/D"),
+        "symbol": re.sub(r"[^A-Za-z0-9._-]", "", str(selected.get("symbol") or "N/D"))[:24] or "N/D",
         "name": str(selected.get("name") or "Token sem nome"),
         "price_usd": _number(price),
     }
@@ -148,6 +148,18 @@ def _save_seen(path, seen, limit=5000):
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(sorted(seen)[-limit:], ensure_ascii=False), encoding="utf-8")
+
+def release_seen_token(cfg, alert):
+    """Allow a failed Telegram delivery to be retried on the next scheduled cycle."""
+    token_address = alert.get("token_address")
+    chain_id = alert.get("chain_id")
+    if not token_address or not chain_id:
+        return
+    state_path = Path(cfg["_root"]) / cfg["launches"]["seen_state_file"]
+    seen = _load_seen(state_path)
+    seen.discard(f"{chain_id}:{str(token_address).lower()}")
+    _save_seen(state_path, seen)
+
 
 def scan_new_launches(cfg):
     """Return only screened candidates; no market order is ever submitted."""
