@@ -157,6 +157,38 @@ class BotFScreeningTests(unittest.TestCase):
         mock_sleep.assert_called_once_with(7.0)
         self.assertEqual(mock_get.call_count, 2)
 
+    @patch("app.new_launches.time.sleep")
+    @patch("app.new_launches.requests.get")
+    def test_gecko_429_zero_retry_after_uses_minimum_six_second_wait(
+        self, mock_get, mock_sleep
+    ):
+        throttled = Mock(status_code=429, headers={"Retry-After": "0"})
+        error = requests.exceptions.HTTPError("rate limited", response=throttled)
+        success = Mock()
+        success.raise_for_status.return_value = None
+        success.json.return_value = {"data": []}
+        mock_get.side_effect = [error, success]
+
+        self.assertEqual(_get_json("https://example.test"), {"data": []})
+        mock_sleep.assert_called_once_with(6.0)
+        self.assertEqual(mock_get.call_count, 2)
+
+    @patch("app.new_launches.time.sleep")
+    @patch("app.new_launches.requests.get")
+    def test_gecko_429_near_zero_retry_after_uses_minimum_six_second_wait(
+        self, mock_get, mock_sleep
+    ):
+        throttled = Mock(status_code=429, headers={"Retry-After": "0.5"})
+        error = requests.exceptions.HTTPError("rate limited", response=throttled)
+        success = Mock()
+        success.raise_for_status.return_value = None
+        success.json.return_value = {"data": []}
+        mock_get.side_effect = [error, success]
+
+        self.assertEqual(_get_json("https://example.test"), {"data": []})
+        mock_sleep.assert_called_once_with(6.0)
+        self.assertEqual(mock_get.call_count, 2)
+
     @patch("app.new_launches.random.uniform", return_value=0.5)
     @patch("app.new_launches.time.sleep")
     @patch("app.new_launches.requests.get")
