@@ -78,7 +78,10 @@ def evaluate_launch_security(data, max_tax=0.05):
         if value is None or str(value).strip() == "":
             continue
         if str(value).strip() == "1":
-            review.append(label)
+            if field == "malicious_address":
+                blockers.append(label)
+            else:
+                review.append(label)
 
     if blockers:
         status = "rejected"
