@@ -2,6 +2,7 @@ import logging
 from .config import load_config
 from .market_data import get_klines, get_24h_tickers, get_book_ticker
 from .agents import run_market_agents, disabled_agent_status
+from .social_sentiment import run_social_agent
 from .new_launches import scan_new_launches, release_seen_token
 from .alerts import emit_alert
 from .logging_setup import setup_logging
@@ -65,6 +66,17 @@ def main():
             log.info("Bot F concluído. Candidatos aprovados para watchlist=%d", len(launch_alerts))
         except Exception:
             log.exception("Bot F indisponível neste ciclo; nenhum candidato foi aprovado sem validação.")
+
+    if cfg.get("social", {}).get("enabled", False):
+        for symbol in cfg.get("social", {}).get("symbols", []):
+            try:
+                alert = run_social_agent(symbol, cfg)
+                if alert:
+                    emit_alert(cfg, alert)
+                    sent += 1
+                    log.info("Alerta: Bot G %s — sentimento/volume após GoPlus.", symbol)
+            except Exception:
+                log.exception("Bot G bloqueou/não concluiu %s; nenhum alerta social foi emitido.", symbol)
 
     for status in disabled_agent_status(cfg):
         log.info("%s: %s — %s", status["agent"], status["status"], status["reason"])
