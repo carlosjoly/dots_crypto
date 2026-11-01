@@ -5,7 +5,6 @@ import json
 import logging
 import random
 from pathlib import Path
-import random
 import re
 import time
 
