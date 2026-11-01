@@ -61,9 +61,14 @@ def run_market_agents(symbol, tf, df, cfg):
     return out
 
 def disabled_agent_status(cfg=None):
-    statuses = [
-        {"agent": "Bot G — Inteligência social", "status": "disabled",
-         "reason": "Requer API social licenciada e verificação contra spam/bots; sem fonte configurada."},
+    statuses = []
+    social_ready = bool(cfg and cfg.get("social", {}).get("enabled", False)
+                        and cfg.get("_env", {}).get("social_api_url")
+                        and cfg.get("_env", {}).get("social_api_key"))
+    if not social_ready:
+        statuses.append({"agent": "Bot G — Sentimento & Volume Social", "status": "disabled",
+                         "reason": "Requer API social licenciada, credenciais e contratos EVM mapeados; GoPlus obrigatório."})
+    statuses += [
         {"agent": "Bot H — Fundamentalista", "status": "disabled",
          "reason": "Requer coleta de fontes primárias, atividade de desenvolvimento e evidências datadas."},
         {"agent": "Bot J — Tokenomics", "status": "disabled",
