@@ -7,7 +7,7 @@ import re
 
 import requests
 
-from .security import goplus_token_security, evaluate_launch_security
+from .security import get_goplus_access_token, goplus_token_security, evaluate_launch_security
 
 log = logging.getLogger("dot_cripto.bot_f")
 GECKO_BASE = "https://api.geckoterminal.com/api/v2"
@@ -161,6 +161,11 @@ def scan_new_launches(cfg):
     alerts = []
     examined = 0
     checked_this_cycle = set()
+    if bool(env.get("goplus_app_key")) != bool(env.get("goplus_app_secret")):
+        raise RuntimeError("Configure GOPLUS_APP_KEY e GOPLUS_APP_SECRET em conjunto.")
+    access_token = None
+    if env.get("goplus_app_key") and env.get("goplus_app_secret"):
+        access_token = get_goplus_access_token(env["goplus_app_key"], env["goplus_app_secret"])
 
     for network in settings["networks"]:
         chain_id = NETWORKS.get(network)
@@ -192,6 +197,7 @@ def scan_new_launches(cfg):
                 security = goplus_token_security(
                     chain_id, token["address"],
                     env.get("goplus_app_key", ""), env.get("goplus_app_secret", ""),
+                    access_token=access_token,
                 )
                 assessment = evaluate_launch_security(
                     security, max_tax=float(settings["max_buy_sell_tax"])
