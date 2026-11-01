@@ -18,6 +18,7 @@ TIMEOUT = 15
 REQUEST_INTERVAL_SECONDS = 6
 MAX_429_RETRIES = 3
 RETRY_JITTER_SECONDS = 1
+MIN_RETRY_AFTER_SECONDS = REQUEST_INTERVAL_SECONDS
 
 NETWORKS = {
     "eth": "1",
@@ -62,10 +63,14 @@ def _get_json(url, params=None):
                 raise
             retry_after = _retry_after_seconds(response)
             if retry_after is not None:
-                wait = retry_after
+                # Treat zero/near-zero Retry-After as unusable for pacing.
+                # A conservative floor avoids immediate retry storms while
+                # still waiting longer whenever the server asks for more time.
+                wait = max(retry_after, MIN_RETRY_AFTER_SECONDS)
                 log.warning(
-                    "GeckoTerminal HTTP 429; respeitando Retry-After por %.2fs (tentativa %d/%d).",
-                    wait, attempt + 1, MAX_429_RETRIES,
+                    "GeckoTerminal HTTP 429; Retry-After recebido: %.2fs; "
+                    "espera aplicada: %.2fs (tentativa %d/%d).",
+                    retry_after, wait, attempt + 1, MAX_429_RETRIES,
                 )
             else:
                 wait = REQUEST_INTERVAL_SECONDS * (2 ** attempt) + random.uniform(
