@@ -200,20 +200,20 @@ def format_message(alert):
 
     extra_section = ""
     if extra_lines:
-        extra_section = "\\n\\nDados do lançamento:\\n" + "\\n".join(f"- {line}" for line in extra_lines)
+        extra_section = "\n\nDados do lançamento:\n" + "\n".join(f"- {line}" for line in extra_lines)
 
     return (
-        f"DOT CRIPTO | {str(agent).upper()}\\n\\n"
-        f"Ativo: {symbol}\\n"
-        f"Período: {timeframe}\\n"
-        f"Preço de referência: US$ {price}\\n\\n"
-        f"SINAL: {str(signal).upper()}\\n\\n"
-        f"Motivos:\\n{reason_lines}\\n\\n"
-        f"Referências técnicas:\\n{chr(10).join(reference_lines)}"
-        f"{extra_section}\\n\\n"
-        f"CONFIANÇA: {confidence}.\\n\\n"
-        f"RISCO: {risk}\\n\\n"
-        f"Horário da coleta: {candle_time}.\\n\\n"
+        f"DOT CRIPTO | {str(agent).upper()}\n\n"
+        f"Ativo: {symbol}\n"
+        f"Período: {timeframe}\n"
+        f"Preço de referência: US$ {price}\n\n"
+        f"SINAL: {str(signal).upper()}\n\n"
+        f"Motivos:\n{reason_lines}\n\n"
+        f"Referências técnicas:\n{chr(10).join(reference_lines)}"
+        f"{extra_section}\n\n"
+        f"CONFIANÇA: {confidence}.\n\n"
+        f"RISCO: {risk}\n\n"
+        f"Horário da coleta: {candle_time}.\n\n"
         "Alerta exclusivamente informativo. Não constitui recomendação de investimento, "
         "não executa ordens e não garante resultados."
     )
