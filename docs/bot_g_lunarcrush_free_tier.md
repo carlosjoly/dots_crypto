@@ -71,4 +71,16 @@ Somente após prova gratuita, revisão do código e testes, apresentar PR técni
 - LunarCrush — API documentation and plan gating: https://lunarcrush.com/en/developers/api
 - LunarCrush — API v4 reference: https://github.com/lunarcrush/api
 
-A disponibilidade pode variar por plano e conta; a documentação pública não substitui a prova de acesso com a conta gratuita efetivamente utilizada.
+## Resultado da prova autenticada (02/11/2026)
+
+GitHub Actions run 41489560164, no PR #8, executou uma única chamada GET ao endpoint acima usando o segredo SOCIAL_API_KEY:
+- HTTP 200; 5.523 registros retornados.
+- BTC, ETH, BNB e LINK encontrados (4/4).
+- Os quatro registros continham social_volume_24h e sentiment.
+- Valores observados no teste: BTC 145.953 / 73; ETH 60.530 / 73; BNB 2.988 / 62; LINK 4.658 / 81.
+- Os registros consultados não continham social_contributors, spam ou generated.
+- 22 testes existentes passaram; prévia Telegram executada sem entrega.
+
+Conclusão atualizada: a conta gratuita efetivamente acessa o endpoint e recebe volume social 24h e sentimento para os quatro ativos. Isso não comprova acesso a todos os endpoints sociais nem fornece histórico, autores únicos, spam/bots ou timestamp de atualização das métricas sociais. O Bot G continua sem autorização para gerar sinais ou alertas. Os valores acima são evidência pontual do teste, não dados em tempo real nem recomendação.
+
+A disponibilidade pode variar por plano e conta; a prova acima vale para a chave/plano testado nesta execução.
