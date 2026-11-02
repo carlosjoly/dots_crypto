@@ -13,6 +13,10 @@ def load_config():
     cfg["_env"] = {
         "telegram_bot_token": os.getenv("TELEGRAM_BOT_TOKEN", "").strip(),
         "telegram_chat_id": os.getenv("TELEGRAM_CHAT_ID", "").strip(),
+        "lunarcrush_enabled": bool(
+            os.getenv("LUNARCRUSH_API_KEY", "").strip()
+            or os.getenv("SOCIAL_API_KEY", "").strip()
+        ),
         "goplus_enabled": os.getenv("GOPLUS_ENABLED", "false").lower() == "true"
             or bool(cfg.get("security", {}).get("goplus_enabled", False)),
         "goplus_app_key": os.getenv("GOPLUS_APP_KEY", "").strip(),
