@@ -107,7 +107,7 @@ def _check_link_goplus(state, now, env):
         return result
 
 
-def run_bot_g_observer(cfg, now=None):
+def run_bot_g_observer(cfg, now=None, alert_callback=None):
     """Collect a bounded hourly social snapshot and persist a 7-day observation history."""
     api_key = os.getenv("SOCIAL_API_KEY", "").strip()
     if not api_key:
