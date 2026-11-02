@@ -61,14 +61,24 @@ def run_market_agents(symbol, tf, df, cfg):
     return out
 
 def disabled_agent_status(cfg=None):
-    statuses = [
-        {"agent": "Bot G — Inteligência social", "status": "disabled",
-         "reason": "Requer API social licenciada e verificação contra spam/bots; sem fonte configurada."},
+    env = (cfg or {}).get("_env", {})
+    social_enabled = bool(
+        env.get("lunarcrush_enabled")
+        or env.get("lunarcrush_api_key")
+        or env.get("social_api_key")
+    )
+    statuses = []
+    if not social_enabled:
+        statuses.append({
+            "agent": "Bot G — Inteligência social", "status": "disabled",
+            "reason": "Chave LunarCrush não configurada; coleta e geração de sinais indisponíveis.",
+        })
+    statuses.extend([
         {"agent": "Bot H — Fundamentalista", "status": "disabled",
          "reason": "Requer coleta de fontes primárias, atividade de desenvolvimento e evidências datadas."},
         {"agent": "Bot J — Tokenomics", "status": "disabled",
          "reason": "Requer dados confiáveis de oferta, distribuição e desbloqueios."},
-    ]
+    ])
     if not cfg or not cfg.get("launches", {}).get("enabled", False) or not cfg.get("_env", {}).get("goplus_enabled", False):
         statuses.insert(0, {
             "agent": "Bot F — Novos lançamentos", "status": "disabled",

@@ -111,11 +111,10 @@ def _check_link_goplus(state, now, env):
 
 
 def _signal_for_snapshot(symbol, snapshot, previous):
-    """Return a social alert only for extreme sentiment plus confirmed volume acceleration.
+    """Return (alert, rejection_reason) with explicit per-asset decision outcomes.
 
-    On an asset's first observation there is no baseline: an extreme sentiment
-    reading is allowed as a clearly labelled preliminary alert, without claiming
-    that social volume accelerated.
+    On an asset's first observation, extreme sentiment may produce a preliminary
+    alert; no acceleration is claimed without a prior baseline.
     """
     sentiment = float(snapshot["sentiment"])
     volume = float(snapshot["social_volume_24h"])
@@ -126,23 +125,23 @@ def _signal_for_snapshot(symbol, snapshot, previous):
         direction = "NEGATIVO"
         sentiment_label = "muito negativo"
     else:
-        return None
+        return None, f"sentimento fora da faixa extrema ({sentiment:.1f}/100; exige >= {SENTIMENT_HIGH:.0f} ou <= {SENTIMENT_LOW:.0f})"
 
     acceleration = None
     if previous is not None:
         previous_volume = float(previous.get("social_volume_24h", 0))
         if previous_volume <= 0:
-            return None
+            return None, "aceleração insuficiente: volume da observação anterior inválido ou zero; baseline não comparável"
         acceleration = round(((volume / previous_volume) - 1.0) * 100.0, 2)
         if acceleration < SOCIAL_VOLUME_ACCELERATION_PCT:
-            return None
+            return None, f"aceleração insuficiente ({acceleration:+.2f}%; mínimo +{SOCIAL_VOLUME_ACCELERATION_PCT:.0f}%)"
 
     if acceleration is None:
         volume_text = "Primeira observação: aceleração do volume social ainda não verificável."
     else:
         volume_text = f"Aceleração do volume social em relação à coleta anterior: +{acceleration:.1f}%."
 
-    return {
+    alert = {
         "agent": "BOT G — VALIDAÇÃO SOCIAL",
         "symbol": symbol,
         "timeframe": "24h social",
@@ -170,6 +169,7 @@ def _signal_for_snapshot(symbol, snapshot, previous):
         "source_freshness_verified": bool(snapshot.get("source_freshness_verified", False)),
         "source": "LunarCrush",
     }
+    return alert, None
 
 
 def _emit_social_alerts(cfg, state, snapshots, now):
@@ -189,14 +189,23 @@ def _emit_social_alerts(cfg, state, snapshots, now):
         # The current snapshot is appended before signal evaluation. Exclude it
         # from the baseline; only an earlier observation may confirm acceleration.
         previous = history[-2] if len(history) >= 2 else None
-        alert = _signal_for_snapshot(symbol, snapshot, previous)
-        if alert is None:
+        alert, rejection_reason = _signal_for_snapshot(symbol, snapshot, previous)
+        if rejection_reason:
+            log.info("Bot G decisão %s: DESCARTADO — %s.", symbol, rejection_reason)
             continue
 
         last_sent = _parse_time(state["alerts"].get(symbol, {}).get("last_sent_at"))
         if last_sent and now - last_sent < ALERT_COOLDOWN:
-            log.info("Bot G: alerta %s suprimido pelo intervalo mínimo de 6h.", symbol)
+            remaining = ALERT_COOLDOWN - (now - last_sent)
+            log.info(
+                "Bot G decisão %s: DESCARTADO — cooldown ativo; último envio=%s; tempo restante=%s.",
+                symbol, last_sent.isoformat(), str(remaining).split(".")[0],
+            )
             continue
+        log.info("Bot G decisão %s: elegível para envio; sentimento=%.1f; volume_24h=%s; aceleração=%s.",
+                 symbol, float(snapshot["sentiment"]), snapshot["social_volume_24h"],
+                 "baseline inicial" if alert["social_volume_acceleration_pct"] is None
+                 else f'{alert["social_volume_acceleration_pct"]:+.2f}%')
 
         if not telegram_ready:
             pending += 1

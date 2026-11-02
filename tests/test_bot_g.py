@@ -6,7 +6,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from app.bot_g import run_bot_g_observer
+from app.bot_g import run_bot_g_observer, _signal_for_snapshot
+from app.agents import disabled_agent_status
 from app.alerts import format_message
 
 
@@ -40,6 +41,28 @@ class BotGObserverTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def test_social_signal_returns_specific_rejection_reason_for_non_extreme_sentiment(self):
+        alert, reason = _signal_for_snapshot("BTCUSDT", self.snapshots["BTCUSDT"], None)
+        self.assertIsNone(alert)
+        self.assertIn("sentimento fora", reason)
+
+    def test_social_signal_returns_specific_rejection_reason_for_low_acceleration(self):
+        previous = {"social_volume_24h": 100}
+        current = dict(self.snapshots["BTCUSDT"], sentiment=82, social_volume_24h=120)
+        alert, reason = _signal_for_snapshot("BTCUSDT", current, previous)
+        self.assertIsNone(alert)
+        self.assertIn("aceleração insuficiente", reason)
+        self.assertIn("+20.00%", reason)
+
+    def test_social_agent_is_not_classified_disabled_when_lunarcrush_is_configured(self):
+        statuses = disabled_agent_status({"_env": {"lunarcrush_enabled": True}})
+        self.assertNotIn("Bot G — Inteligência social", [item["agent"] for item in statuses])
+
+    def test_social_agent_remains_disabled_without_lunarcrush_credentials(self):
+        statuses = disabled_agent_status({"_env": {"lunarcrush_enabled": False}})
+        social = next(item for item in statuses if item["agent"] == "Bot G — Inteligência social")
+        self.assertEqual(social["status"], "disabled")
 
     @patch.dict(os.environ, {"SOCIAL_API_KEY": "test-key"})
     @patch("app.bot_g.emit_alert")
