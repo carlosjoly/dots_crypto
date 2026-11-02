@@ -64,6 +64,21 @@ class BotGObserverTests(unittest.TestCase):
 
     @patch.dict(os.environ, {"SOCIAL_API_KEY": "test-key"})
     @patch("app.bot_g.fetch_social_snapshots")
+    def test_force_collection_bypasses_hourly_throttle_for_validation(self, fetch):
+        state_dir = Path(self.temp.name) / "data"
+        state_dir.mkdir()
+        (state_dir / "bot_g_social_history.json").write_text(json.dumps({
+            "last_collected_at": (self.now - timedelta(minutes=15)).isoformat(),
+            "assets": {}, "goplus": {}, "alerts": {},
+        }))
+        fetch.return_value = self.snapshots
+        result = run_bot_g_observer(self.cfg, self.now, force_collection=True)
+        self.assertEqual(result["status"], "observed")
+        self.assertEqual(result["collected"], 4)
+        fetch.assert_called_once()
+
+    @patch.dict(os.environ, {"SOCIAL_API_KEY": "test-key"})
+    @patch("app.bot_g.fetch_social_snapshots")
     def test_hourly_throttle_prevents_excess_api_calls(self, fetch):
         state_dir = Path(self.temp.name) / "data"
         state_dir.mkdir()
