@@ -53,7 +53,7 @@ class BotGObserverTests(unittest.TestCase):
             "buy_tax": "0.01", "sell_tax": "0.01",
         }
         result = run_bot_g_observer(self.cfg, self.now)
-        self.assertEqual(result, {"status": "observed", "collected": 4, "alerts": 0, "pending_telegram": 0})
+        self.assertEqual(result, {"status": "observed", "collected": 4, "alerts": 0, "pending_telegram": 0, "delivery_failed": 0})
         fetch.assert_called_once()
         goplus.assert_called_once()
         emit.assert_not_called()
