@@ -48,7 +48,7 @@ jobs:
           GOPLUS_ENABLED: ${{ secrets.GOPLUS_ENABLED }}
           GOPLUS_APP_KEY: ${{ secrets.GOPLUS_APP_KEY }}
           GOPLUS_APP_SECRET: ${{ secrets.GOPLUS_APP_SECRET }}
-          SOCIAL_API_KEY: ${{ secrets.SOCIAL_API_KEY }}
+          LUNARCRUSH_API_KEY: ${{ secrets.LUNARCRUSH_API_KEY }}
         run: python -m app.main
       - name: Upload logs and alerts
         if: always()
