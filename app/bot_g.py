@@ -222,8 +222,8 @@ def _emit_social_alerts(cfg, state, snapshots, now):
     return {"emitted": emitted, "pending_telegram": pending, "failed": failed}
 
 
-def run_bot_g_observer(cfg, now=None):
-    """Collect hourly snapshots, evaluate social signals, and persist 7-day history."""
+def run_bot_g_observer(cfg, now=None, force_collection=False):
+    """Collect social snapshots; force_collection is reserved for isolated validation."""
     # Canonical secret name; SOCIAL_API_KEY remains as a backward-compatible alias.
     api_key = (
         os.getenv("LUNARCRUSH_API_KEY", "").strip()
@@ -241,9 +241,11 @@ def run_bot_g_observer(cfg, now=None):
     state = _load_state(state_path)
 
     last = _parse_time(state.get("last_collected_at"))
-    if last and now - last < COLLECTION_INTERVAL:
+    if last and now - last < COLLECTION_INTERVAL and not force_collection:
         log.info("Bot G: janela horária ainda não venceu; coleta social ignorada.")
         return {"status": "throttled", "collected": 0, "alerts": 0}
+    if force_collection and last and now - last < COLLECTION_INTERVAL:
+        log.info("Bot G: limite horário ignorado exclusivamente pela validação isolada.")
 
     snapshots = fetch_social_snapshots(SOCIAL_SYMBOLS, api_key, now=now)
     if not snapshots:
