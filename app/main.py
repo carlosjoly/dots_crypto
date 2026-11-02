@@ -67,7 +67,7 @@ def main():
         except Exception:
             log.exception("Bot F indisponível neste ciclo; nenhum candidato foi aprovado sem validação.")
 
-    # Bot G is an isolated observer: no signal generation and no Telegram delivery.
+    # Bot G performs social signal evaluation and may deliver eligible alerts to Telegram.
     try:
         bot_g_result = run_bot_g_observer(cfg)
         log.info("Bot G: status=%s; ativos coletados=%d", bot_g_result["status"], bot_g_result["collected"])
