@@ -98,3 +98,22 @@ requirements.txt
 .env.example
 .github/workflows/monitor.yml
 ```
+*******************************************************************************************************
+
+Eu seguiria com uma auditoria em duas frentes:
+1. Executar e verificar um ciclo completo na main, agora com o Bot G integrado, conferindo coleta, alertas, histórico e Telegram.
+2. Corrigir o Bot F e realizar testes específicos por rede, sem modificar a lógica dos Bots A–E.
+Depois disso, teremos uma fotografia operacional atualizada de A a G, e poderemos avançar para H, I e J com critérios claros.
+
+1. O que considero prioritário
+Minha avaliação técnica estabelece esta ordem:
+Prioridade	Trabalho	Motivo
+1	Validar Bot G na execução normal da main	Confirmar operação após integração
+2	Corrigir e testar Bot F	Resolver HTTP 404 e HTTP 429
+3	Consolidar A–E	Backtest, custos, slippage e qualidade dos sinais
+4	Construir Bot H	Inteligência fundamentalista com fontes primárias
+5	Construir Bot J	Dados de oferta, distribuição e desbloqueios
+6	Definir Bot I	Estabelecer sua função antes de desenvolver
+
+Minha recomendação: não ativar H e J prematuramente e não criar um Bot I apenas para preencher a sequência. Primeiro precisamos tornar os bots já existentes confiáveis.
+5. Próxima etapa operacional
