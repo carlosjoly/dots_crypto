@@ -1,7 +1,7 @@
-"""Bot G: hourly social-metric observer with fail-closed GoPlus review.
+"""Bot G: social signal validation with per-asset Telegram cooldown.
 
-This module records observations only. It never creates trading signals or
-sends Telegram messages. Social source freshness remains explicitly unverified.
+Signals are informational only. The provider's social-metric freshness is
+currently unverified, so every message carries that limitation explicitly.
 """
 from datetime import datetime, timedelta, timezone
 import json
@@ -9,13 +9,12 @@ import logging
 import os
 from pathlib import Path
 
+from .alerts import emit_alert
 from .lunarcrush_social import fetch_social_snapshots
 from .security import goplus_token_security, evaluate_launch_security
 
 log = logging.getLogger("dot_cripto.bot_g")
 
-# Official Chainlink documentation: Ethereum mainnet, chain ID 1.
-# Native BTC/ETH/BNB are not EVM token contracts and are not sent to GoPlus.
 LINK_CONTRACTS = {
     "ethereum": {
         "chain_id": "1",
@@ -27,6 +26,10 @@ SOCIAL_SYMBOLS = ("BTCUSDT", "ETHUSDT", "BNBUSDT", "LINKUSDT")
 COLLECTION_INTERVAL = timedelta(hours=1)
 HISTORY_RETENTION = timedelta(days=7)
 GOPLUS_RECHECK_INTERVAL = timedelta(hours=24)
+ALERT_COOLDOWN = timedelta(hours=6)
+SENTIMENT_HIGH = 75.0
+SENTIMENT_LOW = 25.0
+SOCIAL_VOLUME_ACCELERATION_PCT = 30.0
 
 
 def _parse_time(value):
@@ -44,16 +47,17 @@ def _parse_time(value):
 def _load_state(path):
     target = Path(path)
     if not target.exists():
-        return {"last_collected_at": None, "assets": {}, "goplus": {}}
+        return {"last_collected_at": None, "assets": {}, "goplus": {}, "alerts": {}}
     try:
         state = json.loads(target.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         raise RuntimeError("Histórico do Bot G ilegível; coleta bloqueada para preservar os dados.") from None
     if not isinstance(state, dict) or not isinstance(state.get("assets", {}), dict):
         raise RuntimeError("Estrutura do histórico do Bot G inválida; coleta bloqueada.")
-    state.setdefault("last_collected_at", None)
-    state.setdefault("assets", {})
-    state.setdefault("goplus", {})
+    for key, default in (("last_collected_at", None), ("assets", {}), ("goplus", {}), ("alerts", {})):
+        state.setdefault(key, default)
+    if not isinstance(state["alerts"], dict) or not isinstance(state["goplus"], dict):
+        raise RuntimeError("Estado de alertas/GoPlus do Bot G inválido; coleta bloqueada.")
     return state
 
 
@@ -92,7 +96,6 @@ def _check_link_goplus(state, now, env):
         log.info("Bot G GoPlus LINK/Ethereum: %s; flags=%d", result["status"], len(result["flags"]))
         return result
     except Exception as exc:
-        # Do not log response bodies, request headers, or credentials.
         result = {
             "status": "review_required",
             "flags": [f"GoPlus indisponível ({type(exc).__name__}); triagem não concluída"],
@@ -107,12 +110,115 @@ def _check_link_goplus(state, now, env):
         return result
 
 
+def _signal_for_snapshot(symbol, snapshot, previous):
+    """Return a social alert only for extreme sentiment plus confirmed volume acceleration.
+
+    On an asset's first observation there is no baseline: an extreme sentiment
+    reading is allowed as a clearly labelled preliminary alert, without claiming
+    that social volume accelerated.
+    """
+    sentiment = float(snapshot["sentiment"])
+    volume = float(snapshot["social_volume_24h"])
+    if sentiment >= SENTIMENT_HIGH:
+        direction = "POSITIVO"
+        sentiment_label = "muito positivo"
+    elif sentiment <= SENTIMENT_LOW:
+        direction = "NEGATIVO"
+        sentiment_label = "muito negativo"
+    else:
+        return None
+
+    acceleration = None
+    if previous is not None:
+        previous_volume = float(previous.get("social_volume_24h", 0))
+        if previous_volume <= 0:
+            return None
+        acceleration = ((volume / previous_volume) - 1.0) * 100.0
+        if acceleration < SOCIAL_VOLUME_ACCELERATION_PCT:
+            return None
+
+    if acceleration is None:
+        volume_text = "Primeira observação: aceleração do volume social ainda não verificável."
+    else:
+        volume_text = f"Aceleração do volume social em relação à coleta anterior: +{acceleration:.1f}%."
+
+    return {
+        "agent": "BOT G — VALIDAÇÃO SOCIAL",
+        "symbol": symbol,
+        "timeframe": "24h social",
+        "price": None,
+        "signal": f"SENTIMENTO SOCIAL {direction}",
+        "rsi": None,
+        "relative_volume": None,
+        "change_pct": None,
+        "atr": None,
+        "confidence": "Não calibrada",
+        "reason": (
+            f"Sentimento {sentiment_label}: {sentiment:.1f}/100. "
+            f"Volume social 24h: {volume:g}. {volume_text}"
+        ),
+        "risk_note": (
+            "Sinal experimental de sentimento, não é sinal de compra/venda. "
+            "A atualização temporal das métricas sociais da fonte não está verificada; "
+            "pode haver atraso, ruído ou manipulação. Confirme preço, liquidez e contexto "
+            "em fontes independentes. Não executa ordens."
+        ),
+        "candle_time_utc": snapshot["collected_at"],
+        "social_sentiment": sentiment,
+        "social_volume_24h": volume,
+        "social_volume_acceleration_pct": acceleration,
+        "source_freshness_verified": bool(snapshot.get("source_freshness_verified", False)),
+        "source": "LunarCrush",
+    }
+
+
+def _emit_social_alerts(cfg, state, snapshots, now):
+    env = cfg.get("_env", {})
+    alerts_cfg = cfg.get("alerts", {})
+    telegram_ready = (
+        alerts_cfg.get("telegram_enabled", True)
+        and bool(env.get("telegram_bot_token"))
+        and bool(env.get("telegram_chat_id"))
+    )
+    emitted = 0
+    pending = 0
+
+    for symbol, snapshot in snapshots.items():
+        history = state["assets"].get(symbol, [])
+        previous = history[-1] if history else None
+        alert = _signal_for_snapshot(symbol, snapshot, previous)
+        if alert is None:
+            continue
+
+        last_sent = _parse_time(state["alerts"].get(symbol, {}).get("last_sent_at"))
+        if last_sent and now - last_sent < ALERT_COOLDOWN:
+            log.info("Bot G: alerta %s suprimido pelo intervalo mínimo de 6h.", symbol)
+            continue
+
+        if not telegram_ready:
+            pending += 1
+            log.warning("Bot G: sinal social %s identificado, mas Telegram não está configurado; envio pendente.", symbol)
+            continue
+
+        # emit_alert writes the JSONL record and sends Telegram. If it raises,
+        # do not advance the per-asset cooldown; the next cycle can retry.
+        emit_alert(cfg, alert)
+        state["alerts"][symbol] = {
+            "last_sent_at": now.isoformat(),
+            "signal": alert["signal"],
+        }
+        emitted += 1
+        log.info("Bot G: alerta Telegram emitido para %s.", symbol)
+
+    return {"emitted": emitted, "pending_telegram": pending}
+
+
 def run_bot_g_observer(cfg, now=None):
-    """Collect a bounded hourly social snapshot and persist a 7-day observation history."""
+    """Collect hourly snapshots, evaluate social signals, and persist 7-day history."""
     api_key = os.getenv("SOCIAL_API_KEY", "").strip()
     if not api_key:
         log.info("Bot G inativo: SOCIAL_API_KEY não configurada.")
-        return {"status": "disabled", "collected": 0}
+        return {"status": "disabled", "collected": 0, "alerts": 0}
 
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
@@ -124,7 +230,7 @@ def run_bot_g_observer(cfg, now=None):
     last = _parse_time(state.get("last_collected_at"))
     if last and now - last < COLLECTION_INTERVAL:
         log.info("Bot G: janela horária ainda não venceu; coleta social ignorada.")
-        return {"status": "throttled", "collected": 0}
+        return {"status": "throttled", "collected": 0, "alerts": 0}
 
     snapshots = fetch_social_snapshots(SOCIAL_SYMBOLS, api_key, now=now)
     if not snapshots:
@@ -143,14 +249,20 @@ def run_bot_g_observer(cfg, now=None):
         log.info(
             "Bot G social %s: volume_24h=%s; sentiment=%s; freshness=%s; contributors/spam/bot_ratio=N/D",
             symbol, snapshot["social_volume_24h"], snapshot["sentiment"],
-            "não verificada",
+            "verificada" if snapshot.get("source_freshness_verified") else "não verificada",
         )
 
+    alert_result = _emit_social_alerts(cfg, state, snapshots, now)
     state["last_collected_at"] = now.isoformat()
     _check_link_goplus(state, now, cfg.get("_env", {}))
     _save_state(state_path, state)
     log.info(
-        "Bot G observador concluído: %d ativos; histórico de até 7 dias; sem sinais e sem Telegram.",
-        len(snapshots),
+        "Bot G concluído: %d ativos; alertas Telegram=%d; pendentes=%d; histórico de até 7 dias.",
+        len(snapshots), alert_result["emitted"], alert_result["pending_telegram"],
     )
-    return {"status": "observed", "collected": len(snapshots)}
+    return {
+        "status": "observed",
+        "collected": len(snapshots),
+        "alerts": alert_result["emitted"],
+        "pending_telegram": alert_result["pending_telegram"],
+    }
