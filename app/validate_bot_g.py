@@ -17,15 +17,27 @@ def main():
     setup_logging(cfg["_root"])
     env = cfg["_env"]
 
-    if not os.getenv("LUNARCRUSH_API_KEY", "").strip() and not os.getenv("SOCIAL_API_KEY", "").strip():
-        raise SystemExit("LUNARCRUSH_API_KEY ausente; validação interrompida.")
     if not env.get("telegram_bot_token") or not env.get("telegram_chat_id"):
         raise SystemExit("TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID ausentes; validação interrompida.")
 
-    # Runs only Bot G. If real social conditions are met, Bot G emits its alerts.
-    result = run_bot_g_observer(cfg)
-    if result.get("status") == "disabled":
-        raise SystemExit("Bot G permaneceu desativado; nenhuma validação foi concluída.")
+    # Test LunarCrush independently. A provider failure must not prevent the
+    # Telegram transport test from running; report both outcomes separately.
+    api_key_present = bool(
+        os.getenv("LUNARCRUSH_API_KEY", "").strip()
+        or os.getenv("SOCIAL_API_KEY", "").strip()
+    )
+    result = None
+    social_error = None
+    if api_key_present:
+        try:
+            result = run_bot_g_observer(cfg)
+            if result.get("status") == "disabled":
+                social_error = "BotGDisabled"
+        except Exception as exc:
+            # Avoid printing raw exception text, headers, URLs or credentials.
+            social_error = type(exc).__name__
+    else:
+        social_error = "LunarCrushKeyMissing"
 
     # A clearly labelled transport test confirms Telegram delivery without
     # presenting a synthetic test as a market signal.
@@ -45,17 +57,25 @@ def main():
     except Exception as exc:
         # Never print the raw exception: Telegram request URLs can contain the bot token.
         raise SystemExit(f"Falha no teste de entrega Telegram ({type(exc).__name__}).") from None
+    social_status = result.get("status") if result else "not_tested"
+    social_alerts = result.get("alerts", 0) if result else 0
     logging.getLogger("dot_cripto.bot_g").info(
-        "Validação isolada concluída: status=%s; ativos=%s; alertas sociais=%s; teste Telegram enviado.",
-        result.get("status"), result.get("collected"), result.get("alerts"),
+        "Validação isolada: LunarCrush=%s; teste Telegram enviado.",
+        social_status if not social_error else f"failed:{social_error}",
     )
     print(
-        "BOT_G_VALIDATION_OK "
-        f"status={result.get('status')} "
-        f"collected={result.get('collected', 0)} "
-        f"social_alerts={result.get('alerts', 0)} "
-        f"delivery_failed={result.get('delivery_failed', 0)}"
+        "BOT_G_TELEGRAM_TEST_SENT "
+        f"social_status={social_status} "
+        f"social_error={social_error or 'none'} "
+        f"collected={result.get('collected', 0) if result else 0} "
+        f"social_alerts={social_alerts} "
+        f"delivery_failed={result.get('delivery_failed', 0) if result else 0}"
     )
+    if social_error:
+        raise SystemExit(
+            "Telegram validado, mas a coleta LunarCrush não foi validada "
+            f"({social_error})."
+        )
 
 
 if __name__ == "__main__":
