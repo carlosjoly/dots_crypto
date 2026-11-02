@@ -180,6 +180,30 @@ class BotGObserverTests(unittest.TestCase):
             run_bot_g_observer(self.cfg, self.now)
         self.assertFalse((Path(self.temp.name) / "data" / "bot_g_social_history.json").exists())
 
+    @patch.dict(os.environ, {"LUNARCRUSH_API_KEY": "canonical-test-key"}, clear=True)
+    @patch("app.bot_g.fetch_social_snapshots")
+    @patch("app.bot_g.goplus_token_security", side_effect=RuntimeError("provider failure"))
+    def test_canonical_lunarcrush_secret_name_is_supported(self, goplus, fetch):
+        fetch.return_value = self.snapshots
+        result = run_bot_g_observer(self.cfg, self.now)
+        self.assertEqual(result["status"], "observed")
+        self.assertEqual(fetch.call_args.args[1], "canonical-test-key")
+
+    @patch.dict(os.environ, {"SOCIAL_API_KEY": "test-key"})
+    @patch("app.bot_g.emit_alert", side_effect=RuntimeError("telegram transport failure"))
+    @patch("app.bot_g.fetch_social_snapshots")
+    @patch("app.bot_g.goplus_token_security", side_effect=RuntimeError("provider failure"))
+    def test_failed_telegram_delivery_does_not_consume_cooldown(self, goplus, fetch, emit):
+        fetch.return_value = {
+            symbol: dict(snapshot, sentiment=82)
+            for symbol, snapshot in self.snapshots.items()
+        }
+        result = run_bot_g_observer(self.cfg, self.now)
+        self.assertEqual(result["alerts"], 0)
+        self.assertEqual(result["delivery_failed"], 4)
+        state = json.loads((Path(self.temp.name) / "data" / "bot_g_social_history.json").read_text())
+        self.assertNotIn("BTCUSDT", state["alerts"])
+
     @patch.dict(os.environ, {}, clear=True)
     @patch("app.bot_g.fetch_social_snapshots")
     def test_missing_social_secret_disables_bot_without_network_call(self, fetch):
