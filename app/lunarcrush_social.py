@@ -93,13 +93,14 @@ def fetch_social_snapshots(symbols, api_key, session=requests, now=None):
         symbol = str(row.get("symbol", "")).upper()
         if symbol not in requested:
             continue
-        if symbol in output:
+        output_symbol = symbol + "USDT"
+        if output_symbol in output:
             raise ValueError(f"LunarCrush returned duplicate symbol {symbol}")
 
         volume = _number(row.get("social_volume_24h"), "social_volume_24h", 0)
         sentiment = _number(row.get("sentiment"), "sentiment", 0, 100)
-        output[symbol + "USDT"] = {
-            "symbol": symbol + "USDT",
+        output[output_symbol] = {
+            "symbol": output_symbol,
             "social_volume_24h": int(volume) if volume.is_integer() else volume,
             "sentiment": sentiment,
             "collected_at": collected_iso,
