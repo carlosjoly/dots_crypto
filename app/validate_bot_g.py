@@ -40,7 +40,11 @@ def main():
         "risk_note": "Mensagem técnica de validação. Não representa leitura de mercado, recomendação ou ordem.",
         "candle_time_utc": datetime.now(timezone.utc).isoformat(),
     }
-    emit_alert(cfg, test_alert)
+    try:
+        emit_alert(cfg, test_alert)
+    except Exception as exc:
+        # Never print the raw exception: Telegram request URLs can contain the bot token.
+        raise SystemExit(f"Falha no teste de entrega Telegram ({type(exc).__name__}).") from None
     logging.getLogger("dot_cripto.bot_g").info(
         "Validação isolada concluída: status=%s; ativos=%s; alertas sociais=%s; teste Telegram enviado.",
         result.get("status"), result.get("collected"), result.get("alerts"),
