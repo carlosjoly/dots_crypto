@@ -182,6 +182,7 @@ def _emit_social_alerts(cfg, state, snapshots, now):
     )
     emitted = 0
     pending = 0
+    failed = 0
 
     for symbol, snapshot in snapshots.items():
         history = state["assets"].get(symbol, [])
@@ -204,7 +205,13 @@ def _emit_social_alerts(cfg, state, snapshots, now):
 
         # emit_alert writes the JSONL record and sends Telegram. If it raises,
         # do not advance the per-asset cooldown; the next cycle can retry.
-        emit_alert(cfg, alert)
+        try:
+            emit_alert(cfg, alert)
+        except Exception as exc:
+            # Avoid logging exception text: Telegram URLs can contain bot tokens.
+            failed += 1
+            log.error("Bot G: falha no envio Telegram para %s (%s); cooldown não consumido.", symbol, type(exc).__name__)
+            continue
         state["alerts"][symbol] = {
             "last_sent_at": now.isoformat(),
             "signal": alert["signal"],
@@ -212,7 +219,7 @@ def _emit_social_alerts(cfg, state, snapshots, now):
         emitted += 1
         log.info("Bot G: alerta Telegram emitido para %s.", symbol)
 
-    return {"emitted": emitted, "pending_telegram": pending}
+    return {"emitted": emitted, "pending_telegram": pending, "failed": failed}
 
 
 def run_bot_g_observer(cfg, now=None):
@@ -267,4 +274,5 @@ def run_bot_g_observer(cfg, now=None):
         "collected": len(snapshots),
         "alerts": alert_result["emitted"],
         "pending_telegram": alert_result["pending_telegram"],
+        "delivery_failed": alert_result["failed"],
     }
