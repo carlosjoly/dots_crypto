@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
@@ -60,6 +61,33 @@ def emit_alert(cfg, alert):
             timeout=12,
         )
         response.raise_for_status()
+        try:
+            payload = response.json()
+        except ValueError:
+            raise RuntimeError("Telegram retornou resposta não JSON.") from None
+        if not isinstance(payload, dict) or payload.get("ok") is not True:
+            error_code = payload.get("error_code") if isinstance(payload, dict) else None
+            description = payload.get("description") if isinstance(payload, dict) else None
+            # Telegram descriptions do not contain the bot token, but avoid
+            # echoing arbitrary response bodies into the workflow log.
+            raise RuntimeError(
+                f"Telegram rejeitou sendMessage (error_code={error_code or 'N/D'}; "
+                f"description={str(description or 'N/D')[:160]})."
+            )
+        result = payload.get("result") or {}
+        returned_chat = (result.get("chat") or {}).get("id")
+        message_id = result.get("message_id")
+        chat_matches = str(returned_chat) == str(env["telegram_chat_id"])
+        logging.getLogger("dot_cripto.telegram").info(
+            "Telegram sendMessage aceito: message_id=%s; chat_id_confere=%s.",
+            message_id if message_id is not None else "N/D",
+            str(chat_matches).lower(),
+        )
+        if not chat_matches:
+            raise RuntimeError(
+                "Telegram aceitou a mensagem, mas o chat_id retornado diverge do destino configurado."
+            )
+        return {"ok": True, "message_id": message_id, "chat_id_matches": True}
 
 
 def _number(value, decimals=2, signed=False):
