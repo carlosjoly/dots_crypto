@@ -133,7 +133,7 @@ def _signal_for_snapshot(symbol, snapshot, previous):
         previous_volume = float(previous.get("social_volume_24h", 0))
         if previous_volume <= 0:
             return None
-        acceleration = ((volume / previous_volume) - 1.0) * 100.0
+        acceleration = round(((volume / previous_volume) - 1.0) * 100.0, 2)
         if acceleration < SOCIAL_VOLUME_ACCELERATION_PCT:
             return None
 
