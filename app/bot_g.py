@@ -224,7 +224,11 @@ def _emit_social_alerts(cfg, state, snapshots, now):
 
 def run_bot_g_observer(cfg, now=None):
     """Collect hourly snapshots, evaluate social signals, and persist 7-day history."""
-    api_key = os.getenv("SOCIAL_API_KEY", "").strip()
+    # Canonical secret name; SOCIAL_API_KEY remains as a backward-compatible alias.
+    api_key = (
+        os.getenv("LUNARCRUSH_API_KEY", "").strip()
+        or os.getenv("SOCIAL_API_KEY", "").strip()
+    )
     if not api_key:
         log.info("Bot G inativo: SOCIAL_API_KEY não configurada.")
         return {"status": "disabled", "collected": 0, "alerts": 0}
