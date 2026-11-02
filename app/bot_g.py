@@ -185,7 +185,9 @@ def _emit_social_alerts(cfg, state, snapshots, now):
 
     for symbol, snapshot in snapshots.items():
         history = state["assets"].get(symbol, [])
-        previous = history[-1] if history else None
+        # The current snapshot is appended before signal evaluation. Exclude it
+        # from the baseline; only an earlier observation may confirm acceleration.
+        previous = history[-2] if len(history) >= 2 else None
         alert = _signal_for_snapshot(symbol, snapshot, previous)
         if alert is None:
             continue
