@@ -3,6 +3,7 @@ from .config import load_config
 from .market_data import get_klines, get_24h_tickers, get_book_ticker
 from .agents import run_market_agents, disabled_agent_status
 from .new_launches import scan_new_launches, release_seen_token
+from .bot_g import run_bot_g_observer
 from .alerts import emit_alert
 from .logging_setup import setup_logging
 
@@ -65,6 +66,13 @@ def main():
             log.info("Bot F concluído. Candidatos aprovados para watchlist=%d", len(launch_alerts))
         except Exception:
             log.exception("Bot F indisponível neste ciclo; nenhum candidato foi aprovado sem validação.")
+
+    # Bot G is an isolated observer: no signal generation and no Telegram delivery.
+    try:
+        bot_g_result = run_bot_g_observer(cfg)
+        log.info("Bot G: status=%s; ativos coletados=%d", bot_g_result["status"], bot_g_result["collected"])
+    except Exception:
+        log.exception("Bot G indisponível neste ciclo; nenhum alerta social foi emitido.")
 
     for status in disabled_agent_status(cfg):
         log.info("%s: %s — %s", status["agent"], status["status"], status["reason"])
