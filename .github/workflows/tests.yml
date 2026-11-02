@@ -5,6 +5,7 @@ on:
     branches:
       - "fix/padrao-mensagens-telegram"
       - "feature/bot-f-new-launches-goplus"
+      - "feature/bot-g-social-alert-validation"
   pull_request:
     branches:
       - main
