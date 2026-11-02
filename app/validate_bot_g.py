@@ -30,7 +30,7 @@ def main():
     social_error = None
     if api_key_present:
         try:
-            result = run_bot_g_observer(cfg)
+            result = run_bot_g_observer(cfg, force_collection=True)
             if result.get("status") != "observed":
                 social_error = f"BotGStatus:{result.get('status')}"
             elif result.get("delivery_failed", 0) or result.get("pending_telegram", 0):
