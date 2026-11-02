@@ -32,6 +32,13 @@ jobs:
           key: bot-f-seen-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
             bot-f-seen-${{ runner.os }}-${{ github.ref_name }}-
+      - name: Restore Bot G social history
+        uses: actions/cache@v4
+        with:
+          path: data/bot_g_social_history.json
+          key: bot-g-social-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            bot-g-social-${{ runner.os }}-${{ github.ref_name }}-
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Run independent monitoring cycle
@@ -41,6 +48,7 @@ jobs:
           GOPLUS_ENABLED: ${{ secrets.GOPLUS_ENABLED }}
           GOPLUS_APP_KEY: ${{ secrets.GOPLUS_APP_KEY }}
           GOPLUS_APP_SECRET: ${{ secrets.GOPLUS_APP_SECRET }}
+          SOCIAL_API_KEY: ${{ secrets.SOCIAL_API_KEY }}
         run: python -m app.main
       - name: Upload logs and alerts
         if: always()
