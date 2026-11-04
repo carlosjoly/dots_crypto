@@ -1,5 +1,7 @@
 import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import requests
@@ -39,6 +41,24 @@ class BotFGeckoTerminalTests(unittest.TestCase):
         sleep.assert_called_once_with(17.0)
         headers = get.call_args.kwargs["headers"]
         self.assertEqual(headers["Accept"], "application/json;version=20230203")
+
+    @patch("app.new_launches.time.sleep")
+    @patch("app.new_launches.requests.get")
+    def test_429_telemetry_records_one_event_per_http_response(self, get, sleep):
+        with tempfile.TemporaryDirectory() as directory:
+            metrics = Path(directory) / "metrics.jsonl"
+            throttled = response(429, headers={"Retry-After": "12"})
+            success = response(200, {"data": []})
+            get.side_effect = [throttled, success]
+            with patch("app.new_launches.API_METRICS_PATH", metrics):
+                self.assertEqual(
+                    _get_json("https://api.geckoterminal.com/api/v2/networks/avax/new_pools"),
+                    {"data": []},
+                )
+            records = [json.loads(line) for line in metrics.read_text().splitlines()]
+            self.assertEqual([item["status"] for item in records], [429, 200])
+            self.assertEqual(records[0]["network_slug"], "avax")
+            self.assertEqual(records[0]["wait_seconds"], 12.0)
 
     @patch("app.new_launches.time.sleep")
     @patch("app.new_launches.requests.get")
