@@ -216,6 +216,14 @@ def format_message(alert):
         reference_lines.append(
             f"- Melhor bid/ask na coleta: US$ {_number(alert['best_bid'], 8)} / US$ {_number(alert['best_ask'], 8)}."
         )
+    if alert.get("market_filter_max_spread_pct") is not None:
+        reference_lines.append(
+            f"- Limite do filtro de spread: {_number(alert['market_filter_max_spread_pct'], 5)}%."
+        )
+    if alert.get("market_filter_snapshot_utc"):
+        reference_lines.append(
+            f"- Horário do snapshot de spread: {_time_brasilia(alert['market_filter_snapshot_utc'])}."
+        )
     if not reference_lines:
         reference_lines.append("- Não aplicável ou não informado.")
 
@@ -232,12 +240,6 @@ def format_message(alert):
         extra_lines.append(f"Volume 24h: US$ {_number(alert['volume_24h_usd'], 2)}")
     if alert.get("goplus_status"):
         extra_lines.append(f"Triagem GoPlus: {alert['goplus_status']}")
-    if alert.get("spread_pct") is not None:
-        extra_lines.append(f"Spread observado na coleta: {_number(alert['spread_pct'], 5)}%")
-    if alert.get("best_bid") is not None and alert.get("best_ask") is not None:
-        extra_lines.append(
-            f"Melhor bid/ask na coleta: US$ {_number(alert['best_bid'], 8)} / US$ {_number(alert['best_ask'], 8)}"
-        )
     if alert.get("source_freshness_status"):
         extra_lines.append(f"Frescor da métrica social: {alert['source_freshness_status']}")
     if alert.get("source_updated_at"):
