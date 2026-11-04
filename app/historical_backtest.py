@@ -141,7 +141,7 @@ def event_study(symbol, timeframe, candles, cfg, fee_per_side_pct=0.10,
                     "signal_time_utc": str(enriched.iloc[index]["close_time"]),
                     "entry_time_utc": str(enriched.iloc[entry_index]["open_time"]),
                     "exit_time_utc": str(enriched.iloc[exit_index]["close_time"]),
-                    "direction": "long" if direction > 0 else "short",
+                    "direction": "bullish" if direction > 0 else "bearish",
                     "horizon_bars": horizon,
                     "entry_price": entry,
                     "exit_price": exit_price,
@@ -230,7 +230,7 @@ def run(days=180, fee_per_side_pct=0.10, slippage_per_side_pct=0.05):
         "horizons_bars": list(HORIZONS),
         "splits": {"train": "first 60%", "validation": "next 20%", "test": "last 20%"},
         "historical_market_filter": "24h quote volume is approximated from candle quote_volume; historical bid/ask spread is unavailable and therefore not reconstructed. Results are not an exact replay of live symbol eligibility.",
-        "warning": "Signals are evaluated independently and may overlap. Results are not portfolio returns or calibrated probabilities.",
+        "warning": "Signals are evaluated independently and may overlap. Bearish outcomes are inverse directional returns, not short-selling trades. Results are not portfolio returns or calibrated probabilities.",
         "summary": summary,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
     manifest_path.write_text(json.dumps(dataset_manifest, ensure_ascii=False, indent=2), encoding="utf-8")
