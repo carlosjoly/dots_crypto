@@ -78,8 +78,8 @@ def _get_json(url, params=None):
                 headers={"Accept": GECKO_ACCEPT, "User-Agent": "DotCripto-BotF/1.0"},
                 timeout=TIMEOUT,
             )
-            _record_api_metric(url, response.status_code, attempt)
             response.raise_for_status()
+            _record_api_metric(url, response.status_code, attempt)
             return response.json()
         except requests.exceptions.HTTPError as exc:
             response = exc.response
