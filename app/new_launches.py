@@ -20,6 +20,7 @@ REQUEST_INTERVAL_SECONDS = 10
 MAX_RETRIES = 3
 RETRY_JITTER_SECONDS = 2
 MIN_RETRY_AFTER_SECONDS = REQUEST_INTERVAL_SECONDS
+API_METRICS_PATH = Path(__file__).resolve().parents[1] / "data" / "bot_f_api_metrics.jsonl"
 GECKO_NETWORK_IDS = {"avalanche": "avax"}
 GECKO_ACCEPT = "application/json;version=20230203"
 
@@ -50,6 +51,21 @@ def _retry_after_seconds(response):
             return None
 
 
+def _record_api_metric(url, status, attempt, retry_after=None, wait_seconds=0):
+    network_slug = url.split("/networks/")[-1].split("/")[0] if "/networks/" in url else "N/D"
+    record = {
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "network_slug": network_slug,
+        "status": status,
+        "attempt": attempt + 1,
+        "retry_after_seconds": retry_after,
+        "wait_seconds": round(float(wait_seconds), 3),
+    }
+    API_METRICS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with API_METRICS_PATH.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False) + "\\n")
+
+
 def _get_json(url, params=None):
     """GET JSON with bounded backoff for rate limits and transient server errors."""
     retryable_statuses = {429, 500, 502, 503, 504}
@@ -60,6 +76,7 @@ def _get_json(url, params=None):
                 headers={"Accept": GECKO_ACCEPT, "User-Agent": "DotCripto-BotF/1.0"},
                 timeout=TIMEOUT,
             )
+            _record_api_metric(url, response.status_code, attempt)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.HTTPError as exc:
@@ -73,6 +90,7 @@ def _get_json(url, params=None):
                 exponential + random.uniform(0, RETRY_JITTER_SECONDS)
             )
             network_slug = url.split("/networks/")[-1].split("/")[0] if "/networks/" in url else "N/D"
+            _record_api_metric(url, status, attempt, retry_after, wait)
             log.warning(
                 "GeckoTerminal rate_limit_retry network=%s status=%s; Retry-After=%s; "
                 "backoff_aplicado=%.2fs; tentativa=%d/%d.",
