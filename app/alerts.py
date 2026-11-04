@@ -210,6 +210,12 @@ def format_message(alert):
         reference_lines.append(f"- Variação: {change}%.")
     if alert.get("atr") is not None:
         reference_lines.append(f"- ATR: {atr}.")
+    if alert.get("spread_pct") is not None:
+        reference_lines.append(f"- Spread observado: {_number(alert['spread_pct'], 5)}%.")
+    if alert.get("best_bid") is not None and alert.get("best_ask") is not None:
+        reference_lines.append(
+            f"- Melhor bid/ask na coleta: US$ {_number(alert['best_bid'], 8)} / US$ {_number(alert['best_ask'], 8)}."
+        )
     if not reference_lines:
         reference_lines.append("- Não aplicável ou não informado.")
 
