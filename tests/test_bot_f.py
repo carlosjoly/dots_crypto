@@ -154,12 +154,12 @@ class BotFScreeningTests(unittest.TestCase):
         mock_get.side_effect = [error, success]
 
         self.assertEqual(_get_json("https://example.test"), {"data": []})
-        mock_sleep.assert_called_once_with(7.0)
+        mock_sleep.assert_called_once_with(10)
         self.assertEqual(mock_get.call_count, 2)
 
     @patch("app.new_launches.time.sleep")
     @patch("app.new_launches.requests.get")
-    def test_gecko_429_zero_retry_after_uses_minimum_six_second_wait(
+    def test_gecko_429_zero_retry_after_uses_minimum_ten_second_wait(
         self, mock_get, mock_sleep
     ):
         throttled = Mock(status_code=429, headers={"Retry-After": "0"})
@@ -170,12 +170,12 @@ class BotFScreeningTests(unittest.TestCase):
         mock_get.side_effect = [error, success]
 
         self.assertEqual(_get_json("https://example.test"), {"data": []})
-        mock_sleep.assert_called_once_with(6.0)
+        mock_sleep.assert_called_once_with(10)
         self.assertEqual(mock_get.call_count, 2)
 
     @patch("app.new_launches.time.sleep")
     @patch("app.new_launches.requests.get")
-    def test_gecko_429_near_zero_retry_after_uses_minimum_six_second_wait(
+    def test_gecko_429_near_zero_retry_after_uses_minimum_ten_second_wait(
         self, mock_get, mock_sleep
     ):
         throttled = Mock(status_code=429, headers={"Retry-After": "0.5"})
@@ -186,7 +186,7 @@ class BotFScreeningTests(unittest.TestCase):
         mock_get.side_effect = [error, success]
 
         self.assertEqual(_get_json("https://example.test"), {"data": []})
-        mock_sleep.assert_called_once_with(6.0)
+        mock_sleep.assert_called_once_with(10)
         self.assertEqual(mock_get.call_count, 2)
 
     @patch("app.new_launches.random.uniform", return_value=0.5)
@@ -203,7 +203,7 @@ class BotFScreeningTests(unittest.TestCase):
         mock_get.side_effect = [error, success]
 
         self.assertEqual(_get_json("https://example.test"), {"data": []})
-        mock_sleep.assert_called_once_with(6.5)
+        mock_sleep.assert_called_once_with(10.5)
         self.assertEqual(mock_get.call_count, 2)
 
     @patch("app.new_launches.random.uniform", return_value=0.25)
@@ -222,7 +222,7 @@ class BotFScreeningTests(unittest.TestCase):
         self.assertEqual(mock_get.call_count, 4)
         self.assertEqual(
             [call.args[0] for call in mock_sleep.call_args_list],
-            [6.25, 12.25, 24.25],
+            [10.25, 20.25, 40.25],
         )
 
     def test_seen_state_round_trip(self):

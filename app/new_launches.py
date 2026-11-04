@@ -15,10 +15,13 @@ from .security import get_goplus_access_token, goplus_token_security, evaluate_l
 log = logging.getLogger("dot_cripto.bot_f")
 GECKO_BASE = "https://api.geckoterminal.com/api/v2"
 TIMEOUT = 15
-REQUEST_INTERVAL_SECONDS = 6
-MAX_429_RETRIES = 3
-RETRY_JITTER_SECONDS = 1
+# GeckoTerminal's public limit is approximately 10 calls/minute; keep a safety margin.
+REQUEST_INTERVAL_SECONDS = 10
+MAX_RETRIES = 3
+RETRY_JITTER_SECONDS = 2
 MIN_RETRY_AFTER_SECONDS = REQUEST_INTERVAL_SECONDS
+GECKO_NETWORK_IDS = {"avalanche": "avax"}
+GECKO_ACCEPT = "application/json;version=20230203"
 
 NETWORKS = {
     "eth": "1",
@@ -48,45 +51,44 @@ def _retry_after_seconds(response):
 
 
 def _get_json(url, params=None):
-    """GET JSON with bounded retries for HTTP 429 responses only."""
-    for attempt in range(MAX_429_RETRIES + 1):
+    """GET JSON with bounded backoff for rate limits and transient server errors."""
+    retryable_statuses = {429, 500, 502, 503, 504}
+    for attempt in range(MAX_RETRIES + 1):
         try:
             response = requests.get(
-                url, params=params, headers={"Accept": "application/json"},
+                url, params=params,
+                headers={"Accept": GECKO_ACCEPT, "User-Agent": "DotCripto-BotF/1.0"},
                 timeout=TIMEOUT,
             )
             response.raise_for_status()
             return response.json()
         except requests.exceptions.HTTPError as exc:
             response = exc.response
-            if getattr(response, "status_code", None) != 429 or attempt >= MAX_429_RETRIES:
+            status = getattr(response, "status_code", None)
+            if status not in retryable_statuses or attempt >= MAX_RETRIES:
                 raise
             retry_after = _retry_after_seconds(response)
-            if retry_after is not None:
-                # Treat zero/near-zero Retry-After as unusable for pacing.
-                # A conservative floor avoids immediate retry storms while
-                # still waiting longer whenever the server asks for more time.
-                wait = max(retry_after, MIN_RETRY_AFTER_SECONDS)
-                log.warning(
-                    "GeckoTerminal HTTP 429; Retry-After recebido: %.2fs; "
-                    "espera aplicada: %.2fs (tentativa %d/%d).",
-                    retry_after, wait, attempt + 1, MAX_429_RETRIES,
-                )
-            else:
-                wait = REQUEST_INTERVAL_SECONDS * (2 ** attempt) + random.uniform(
-                    0, RETRY_JITTER_SECONDS
-                )
-                log.warning(
-                    "GeckoTerminal HTTP 429 sem Retry-After válido; backoff %.2fs (tentativa %d/%d).",
-                    wait, attempt + 1, MAX_429_RETRIES,
-                )
+            exponential = REQUEST_INTERVAL_SECONDS * (2 ** attempt)
+            wait = max(retry_after, MIN_RETRY_AFTER_SECONDS) if retry_after is not None else (
+                exponential + random.uniform(0, RETRY_JITTER_SECONDS)
+            )
+            log.warning(
+                "GeckoTerminal HTTP %s; Retry-After=%s; backoff aplicado=%.2fs "
+                "(tentativa %d/%d).",
+                status, retry_after, wait, attempt + 1, MAX_RETRIES,
+            )
             time.sleep(wait)
-    raise RuntimeError("GeckoTerminal: limite de tentativas HTTP 429 excedido.")
+    raise RuntimeError("GeckoTerminal: limite de tentativas de rede excedido.")
+
+def gecko_network_id(network):
+    """Resolve project network names to the exact GeckoTerminal network slug."""
+    return GECKO_NETWORK_IDS.get(network, network)
 
 def fetch_new_pools(network, page=1):
     """Fetch recent pools plus token and DEX relationships from GeckoTerminal."""
+    gecko_network = gecko_network_id(network)
     payload = _get_json(
-        f"{GECKO_BASE}/networks/{network}/new_pools",
+        f"{GECKO_BASE}/networks/{gecko_network}/new_pools",
         params={"page": page, "include": "base_token,quote_token,dex"},
     )
     included = {
@@ -116,7 +118,7 @@ def fetch_new_pools(network, page=1):
             "dex": dex.get("name") or dex_id or "N/D",
             "base_price_usd": attrs.get("base_token_price_usd"),
             "quote_price_usd": attrs.get("quote_token_price_usd"),
-            "network": network,
+            "network": gecko_network,
         })
     return pools
 
@@ -310,7 +312,7 @@ def scan_new_launches(cfg):
                 ),
                 "candle_time_utc": now.isoformat(),
                 "pool_created_at_utc": created.isoformat() if created else None,
-                "pool_url": f"https://www.geckoterminal.com/{network}/pools/{pool.get('pool_address')}",
+                "pool_url": f"https://www.geckoterminal.com/{gecko_network_id(network)}/pools/{pool.get('pool_address')}",
                 "token_address": token["address"],
                 "network": network,
                 "chain_id": chain_id,
