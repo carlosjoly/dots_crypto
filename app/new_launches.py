@@ -82,9 +82,10 @@ def _get_json(url, params=None):
         except requests.exceptions.HTTPError as exc:
             response = exc.response
             status = getattr(response, "status_code", None)
+            retry_after = _retry_after_seconds(response) if status == 429 else None
             if status not in retryable_statuses or attempt >= MAX_RETRIES:
+                _record_api_metric(url, status, attempt, retry_after, 0)
                 raise
-            retry_after = _retry_after_seconds(response)
             exponential = REQUEST_INTERVAL_SECONDS * (2 ** attempt)
             wait = max(retry_after, MIN_RETRY_AFTER_SECONDS) if retry_after is not None else (
                 exponential + random.uniform(0, RETRY_JITTER_SECONDS)
