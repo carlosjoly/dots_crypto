@@ -118,6 +118,8 @@ class BotFGeckoTerminalTests(unittest.TestCase):
             "txns_24h": {"buys": 40, "sells": 35},
             "base": {"address": "0x" + "2" * 40},
             "quote": {"address": "0x" + "3" * 40},
+            "base_price_usd": "0.5",
+            "quote_price_usd": "1.0",
         }
         second = dict(pool, pool_id="avax_0xpool2", pool_address="0x" + "4" * 40)
         with patch.object(
@@ -137,6 +139,8 @@ class BotFGeckoTerminalTests(unittest.TestCase):
         self.assertEqual(result["unique_pool_count"], 2)
         self.assertEqual(result["duplicate_pool_count"], 1)
         self.assertEqual(result["complete_record_count"], 2)
+        self.assertEqual(result["field_quality"]["base_token_price_usd"]["coverage_pct"], 100.0)
+        self.assertEqual(result["field_quality"]["quote_token_price_usd"]["coverage_pct"], 100.0)
         self.assertEqual(result["field_quality"]["pool_address"]["coverage_pct"], 100.0)
         self.assertFalse(result["spread_data_available"])
 
@@ -148,6 +152,32 @@ class BotFGeckoTerminalTests(unittest.TestCase):
         self.assertEqual(result["complete_record_count"], 0)
         self.assertEqual(result["field_quality"]["pool_address"]["invalid_or_missing"], 1)
         self.assertEqual(result["field_quality"]["liquidity_usd"]["coverage_pct"], 0.0)
+
+    def test_avalanche_validator_does_not_call_empty_collection_success(self):
+        with patch.object(avalanche_validation, "fetch_new_pools", return_value=[]):
+            result = avalanche_validation.validate()
+        self.assertEqual(result["status"], "no_data")
+        self.assertEqual(result["quality_status"], "no_data")
+        self.assertEqual(result["pools_received"], 0)
+
+    def test_avalanche_validator_flags_future_pool_timestamp(self):
+        future = {
+            "pool_id": "avax_future",
+            "pool_address": "0x" + "1" * 40,
+            "created_at": (datetime.now(timezone.utc) + timedelta(minutes=2)).isoformat(),
+            "liquidity_usd": "25000",
+            "volume_24h_usd": "12000",
+            "txns_24h": {"buys": 40, "sells": 35},
+            "base": {"address": "0x" + "2" * 40},
+            "quote": {"address": "0x" + "3" * 40},
+            "base_price_usd": "0.5",
+            "quote_price_usd": "1.0",
+        }
+        with patch.object(avalanche_validation, "fetch_new_pools", return_value=[future]):
+            result = avalanche_validation.validate()
+        self.assertEqual(result["future_created_at_count"], 1)
+        self.assertEqual(result["field_quality"]["created_at"]["invalid_or_missing"], 1)
+        self.assertEqual(result["complete_record_count"], 0)
 
 
 if __name__ == "__main__":
