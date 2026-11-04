@@ -63,7 +63,7 @@ def _record_api_metric(url, status, attempt, retry_after=None, wait_seconds=0):
     }
     API_METRICS_PATH.parent.mkdir(parents=True, exist_ok=True)
     with API_METRICS_PATH.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(record, ensure_ascii=False) + "\\n")
+        handle.write(json.dumps(record, ensure_ascii=False) + chr(10))
 
 
 def _get_json(url, params=None):
