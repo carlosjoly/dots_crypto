@@ -30,6 +30,8 @@ QUALITY_FIELDS = (
     "txns_24h",
     "base_token_address",
     "quote_token_address",
+    "base_token_price_usd",
+    "quote_token_price_usd",
 )
 
 
@@ -40,6 +42,8 @@ def _pool_quality(pool, now):
     created = _created_at(pool.get("created_at"))
     liquidity = _number(pool.get("liquidity_usd"))
     volume = _number(pool.get("volume_24h_usd"))
+    base_price = _number(pool.get("base_price_usd"))
+    quote_price = _number(pool.get("quote_price_usd"))
     txns = pool.get("txns_24h")
     buys = _number(txns.get("buys")) if isinstance(txns, dict) else None
     sells = _number(txns.get("sells")) if isinstance(txns, dict) else None
@@ -47,14 +51,16 @@ def _pool_quality(pool, now):
     checks = {
         "pool_id": bool(pool.get("pool_id")),
         "pool_address": bool(ADDRESS_RE.fullmatch(str(pool.get("pool_address") or ""))),
-        "created_at": created is not None and created <= now + timedelta(minutes=5),
+        "created_at": created is not None and created <= now,
         "liquidity_usd": liquidity is not None and liquidity >= 0,
         "volume_24h_usd": volume is not None and volume >= 0,
         "txns_24h": buys is not None and sells is not None and buys >= 0 and sells >= 0,
         "base_token_address": bool(ADDRESS_RE.fullmatch(str(base.get("address") or ""))),
         "quote_token_address": bool(ADDRESS_RE.fullmatch(str(quote.get("address") or ""))),
+        "base_token_price_usd": base_price is not None and base_price > 0,
+        "quote_token_price_usd": quote_price is not None and quote_price > 0,
     }
-    age_minutes = (now - created).total_seconds() / 60 if created and created <= now + timedelta(minutes=5) else None
+    age_minutes = (now - created).total_seconds() / 60 if created and created <= now else None
     return checks, age_minutes
 
 
@@ -159,14 +165,14 @@ def validate():
         future_count = 0
         for pool in all_pools:
             checks, age_minutes = _pool_quality(pool, now)
+            created_at = _created_at(pool.get("created_at"))
+            if created_at is not None and created_at > now:
+                future_count += 1
             for field, valid in checks.items():
                 counts[field] += int(valid)
             complete += int(all(checks.values()))
             if age_minutes is not None:
-                if age_minutes < 0:
-                    future_count += 1
-                else:
-                    ages.append(age_minutes)
+                ages.append(age_minutes)
         total = len(all_pools)
         result["field_quality"] = {
             field: {
@@ -189,7 +195,13 @@ def validate():
     else:
         result["quality_status"] = "no_data"
 
-    result["status"] = "success" if request_error is None else "partial_failure"
+    if request_error is not None:
+        result["status"] = "partial_failure"
+    elif not all_pools:
+        # A successful HTTP cycle with no pool data is not sufficient validation evidence.
+        result["status"] = "no_data"
+    else:
+        result["status"] = "success"
     result["spread_data_available"] = False
     return result
 
