@@ -55,6 +55,12 @@ class AlertFormattingTests(unittest.TestCase):
         self.assertIn("31/10/2026 às 13:14:59 (UTC-3)", message)
         self.assertNotIn("999000", message)
 
+    def test_includes_observed_spread_and_order_book_snapshot(self):
+        alert = dict(self.alert, spread_pct=0.01234, best_bid=2251.8, best_ask=2252.08)
+        message = format_message(alert)
+        self.assertIn("Spread observado na coleta: 0,01234%", message)
+        self.assertIn("Melhor bid/ask na coleta: US$ 2.251,80000000 / US$ 2.252,08000000", message)
+
     def test_does_not_mutate_original_alert(self):
         original = dict(self.alert)
         format_message(self.alert)
