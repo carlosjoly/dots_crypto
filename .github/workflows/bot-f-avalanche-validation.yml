@@ -1,0 +1,32 @@
+name: Dot Cripto Bot F Avalanche Validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  avalanche-endpoint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Validate GeckoTerminal Avalanche endpoint
+        run: python -m app.validate_bot_f_avalanche
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bot-f-avalanche-validation-${{ github.run_id }}
+          path: data/bot_f_avalanche_validation.json
+          if-no-files-found: warn
+          retention-days: 14

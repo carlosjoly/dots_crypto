@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from app.bot_g import run_bot_g_observer, _signal_for_snapshot
+from app.bot_g import run_bot_g_observer, _signal_for_snapshot, _snapshot_quality
 from app.agents import disabled_agent_status
 from app.alerts import format_message
 
@@ -41,6 +41,23 @@ class BotGObserverTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def test_snapshot_quality_distinguishes_unknown_freshness_from_verified_freshness(self):
+        snapshot = dict(self.snapshots["BTCUSDT"])
+        self.assertEqual(_snapshot_quality(snapshot, self.now)[0], "unknown")
+        snapshot["source_updated_at"] = (self.now - timedelta(minutes=15)).isoformat()
+        self.assertEqual(_snapshot_quality(snapshot, self.now)[0], "verified_fresh")
+
+    def test_snapshot_quality_rejects_stale_source_metrics(self):
+        snapshot = dict(self.snapshots["BTCUSDT"])
+        snapshot["source_updated_at"] = (self.now - timedelta(hours=3)).isoformat()
+        status, reason = _snapshot_quality(snapshot, self.now)
+        self.assertEqual(status, "stale_source")
+        self.assertIn("limite de frescor", reason)
+
+    def test_snapshot_quality_rejects_invalid_social_values(self):
+        snapshot = dict(self.snapshots["BTCUSDT"], sentiment=101)
+        self.assertEqual(_snapshot_quality(snapshot, self.now)[0], "invalid_metrics")
 
     def test_social_signal_returns_specific_rejection_reason_for_non_extreme_sentiment(self):
         alert, reason = _signal_for_snapshot("BTCUSDT", self.snapshots["BTCUSDT"], None)

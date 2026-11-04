@@ -117,3 +117,30 @@ Prioridade	Trabalho	Motivo
 
 Minha recomendação: não ativar H e J prematuramente e não criar um Bot I apenas para preencher a sequência. Primeiro precisamos tornar os bots já existentes confiáveis.
 5. Próxima etapa operacional
+
+## Auditoria de mercado, Bot F e Bot G
+
+- Os alertas A–E preservam o spread, melhor bid/ask e horário do snapshot de bookTicker usado na aprovação do filtro. O arquivo `data/market_filter_audit.jsonl` registra decisões de aprovação, rejeição e erro por símbolo.
+- O Bot F mantém `data/bot_f_api_metrics.jsonl` com timestamp, slug GeckoTerminal, status HTTP, tentativa, Retry-After e espera aplicada. O workflow principal restaura e salva esse histórico via cache do Actions.
+- Para testar somente a rota Avalanche, use **Actions → Dot Cripto Bot F Avalanche Validation → Run workflow**. O teste consulta o endpoint `/networks/avax/new_pools`, não chama GoPlus e não envia alertas.
+- O Bot G valida timestamp da coleta, limites numéricos e, quando disponível, o timestamp de atualização fornecido pela fonte. Se a LunarCrush não expuser esse timestamp, a qualidade fica explicitamente como `unknown`; isso não é convertido em frescor verificado. Campos de contribuidores, spam e proporção de bots permanecem N/D quando a API não os fornece.
+
+## Amostra histórica e estudo de eventos A–E
+
+Use **Actions → Dot Cripto Historical Backtest → Run workflow**. O padrão é 180 dias; a janela permitida é de 60 a 365 dias.
+
+O workflow:
+- baixa candles Spot da Binance para os símbolos e timeframes definidos em `config.yaml`;
+- rejeita séries com duplicatas, ordenação inválida, candle incompleto, valores inválidos ou lacunas;
+- calcula os sinais ponto a ponto, sem usar candles futuros para formar o sinal;
+- considera entrada na abertura do candle seguinte e saídas após 1, 4, 16 e 48 candles;
+- separa cronologicamente treino (60%), validação (20%) e teste (20%);
+- aplica premissas editáveis de taxa e slippage por lado (padrões: 0,10% e 0,05%).
+
+O artefato contém:
+- `data/historical/`: candles baixados em CSV;
+- `data/backtest/events.csv`: observações individuais;
+- `data/backtest/summary.json`: métricas por bot, ativo, timeframe, horizonte e partição;
+- `data/backtest/dataset_manifest.json`: cobertura e validade de cada conjunto.
+
+**Limitação metodológica:** isso é um estudo de eventos, não um simulador de carteira. Eventos podem se sobrepor; não representa alocação de capital, execução real, liquidez histórica, slippage observado, nem probabilidade calibrada. As premissas de custo são parâmetros do estudo, não taxas efetivamente cobradas da conta.

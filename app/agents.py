@@ -16,8 +16,12 @@ def _alert(agent, symbol, tf, row, signal, reason, confidence="não calibrada"):
     }
 
 def run_market_agents(symbol, tf, df, cfg):
+    return run_market_agents_enriched(symbol, tf, enrich(df), cfg)
+
+
+def run_market_agents_enriched(symbol, tf, d, cfg):
+    """Evaluate agents against an already enriched, point-in-time candle frame."""
     out = []
-    d = enrich(df)
     if len(d) < 55:
         return out
     r = d.iloc[-1]

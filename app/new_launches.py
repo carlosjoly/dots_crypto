@@ -20,6 +20,7 @@ REQUEST_INTERVAL_SECONDS = 10
 MAX_RETRIES = 3
 RETRY_JITTER_SECONDS = 2
 MIN_RETRY_AFTER_SECONDS = REQUEST_INTERVAL_SECONDS
+API_METRICS_PATH = Path(__file__).resolve().parents[1] / "data" / "bot_f_api_metrics.jsonl"
 GECKO_NETWORK_IDS = {"avalanche": "avax"}
 GECKO_ACCEPT = "application/json;version=20230203"
 
@@ -50,6 +51,23 @@ def _retry_after_seconds(response):
             return None
 
 
+def _record_api_metric(url, status, attempt, retry_after=None, wait_seconds=0):
+    if not isinstance(status, int):
+        status = None
+    network_slug = url.split("/networks/")[-1].split("/")[0] if "/networks/" in url else "N/D"
+    record = {
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "network_slug": network_slug,
+        "status": status,
+        "attempt": attempt + 1,
+        "retry_after_seconds": retry_after,
+        "wait_seconds": round(float(wait_seconds), 3),
+    }
+    API_METRICS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with API_METRICS_PATH.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False) + chr(10))
+
+
 def _get_json(url, params=None):
     """GET JSON with bounded backoff for rate limits and transient server errors."""
     retryable_statuses = {429, 500, 502, 503, 504}
@@ -61,21 +79,25 @@ def _get_json(url, params=None):
                 timeout=TIMEOUT,
             )
             response.raise_for_status()
+            _record_api_metric(url, response.status_code, attempt)
             return response.json()
         except requests.exceptions.HTTPError as exc:
             response = exc.response
             status = getattr(response, "status_code", None)
+            retry_after = _retry_after_seconds(response) if status == 429 else None
             if status not in retryable_statuses or attempt >= MAX_RETRIES:
+                _record_api_metric(url, status, attempt, retry_after, 0)
                 raise
-            retry_after = _retry_after_seconds(response)
             exponential = REQUEST_INTERVAL_SECONDS * (2 ** attempt)
             wait = max(retry_after, MIN_RETRY_AFTER_SECONDS) if retry_after is not None else (
                 exponential + random.uniform(0, RETRY_JITTER_SECONDS)
             )
+            network_slug = url.split("/networks/")[-1].split("/")[0] if "/networks/" in url else "N/D"
+            _record_api_metric(url, status, attempt, retry_after, wait)
             log.warning(
-                "GeckoTerminal HTTP %s; Retry-After=%s; backoff aplicado=%.2fs "
-                "(tentativa %d/%d).",
-                status, retry_after, wait, attempt + 1, MAX_RETRIES,
+                "GeckoTerminal rate_limit_retry network=%s status=%s; Retry-After=%s; "
+                "backoff_aplicado=%.2fs; tentativa=%d/%d.",
+                network_slug, status, retry_after, wait, attempt + 1, MAX_RETRIES,
             )
             time.sleep(wait)
     raise RuntimeError("GeckoTerminal: limite de tentativas de rede excedido.")
@@ -87,6 +109,8 @@ def gecko_network_id(network):
 def fetch_new_pools(network, page=1):
     """Fetch recent pools plus token and DEX relationships from GeckoTerminal."""
     gecko_network = gecko_network_id(network)
+    log.info("Bot F coleta iniciada: network_config=%s; gecko_slug=%s; page=%d.",
+             network, gecko_network, page)
     payload = _get_json(
         f"{GECKO_BASE}/networks/{gecko_network}/new_pools",
         params={"page": page, "include": "base_token,quote_token,dex"},
@@ -120,6 +144,8 @@ def fetch_new_pools(network, page=1):
             "quote_price_usd": attrs.get("quote_token_price_usd"),
             "network": gecko_network,
         })
+    log.info("Bot F coleta concluída: network_config=%s; gecko_slug=%s; pools_recebidos=%d.",
+             network, gecko_network, len(pools))
     return pools
 
 def _number(value):
@@ -227,6 +253,7 @@ def scan_new_launches(cfg):
     alerts = []
     examined = 0
     checked_this_cycle = set()
+    network_summary = {}
     if bool(env.get("goplus_app_key")) != bool(env.get("goplus_app_secret")):
         raise RuntimeError("Configure GOPLUS_APP_KEY e GOPLUS_APP_SECRET em conjunto.")
     access_token = None
@@ -234,14 +261,21 @@ def scan_new_launches(cfg):
         access_token = get_goplus_access_token(env["goplus_app_key"], env["goplus_app_secret"])
 
     for network in settings["networks"]:
+        network_slug = gecko_network_id(network)
+        network_summary[network] = {"gecko_slug": network_slug, "pools": 0, "market_eligible": 0,
+                                    "security_checked": 0, "approved": 0, "status": "started"}
         chain_id = NETWORKS.get(network)
         if not chain_id:
             log.warning("Bot F: rede sem mapeamento GoPlus, ignorada: %s", network)
             continue
         try:
             pools = fetch_new_pools(network)
-        except Exception:
-            log.exception("Bot F: falha ao consultar GeckoTerminal para %s", network)
+            network_summary[network]["pools"] = len(pools)
+            network_summary[network]["status"] = "collected"
+        except Exception as exc:
+            network_summary[network]["status"] = f"collection_error:{type(exc).__name__}"
+            log.exception("Bot F: falha ao consultar GeckoTerminal network_config=%s gecko_slug=%s",
+                          network, network_slug)
             continue
         finally:
             # Keep a fixed inter-network pause even when one network fails.
@@ -257,11 +291,13 @@ def scan_new_launches(cfg):
             eligible, market_reason = _market_eligibility(pool, cfg, now)
             if not eligible:
                 continue
+            network_summary[network]["market_eligible"] += 1
             examined += 1
             checked_this_cycle.add(identity)
             if examined > int(settings["max_security_checks_per_cycle"]):
                 log.warning("Bot F: limite de verificações GoPlus por ciclo atingido.")
                 break
+            network_summary[network]["security_checked"] += 1
             try:
                 security = goplus_token_security(
                     chain_id, token["address"],
@@ -287,6 +323,7 @@ def scan_new_launches(cfg):
 
             seen.add(identity)
             created = _created_at(pool.get("created_at"))
+            network_summary[network]["approved"] += 1
             alerts.append({
                 "agent": "Bot F — Novos lançamentos",
                 "symbol": token["symbol"],
@@ -323,4 +360,12 @@ def scan_new_launches(cfg):
                 "market_filter": market_reason,
             })
     _save_seen(state_path, seen)
+    for network, stats in network_summary.items():
+        log.info("Bot F resumo rede: network_config=%s; gecko_slug=%s; status=%s; pools=%d; "
+                 "market_eligible=%d; security_checked=%d; approved=%d.",
+                 network, stats["gecko_slug"], stats["status"], stats["pools"],
+                 stats["market_eligible"], stats["security_checked"], stats["approved"])
+    log.info("Bot F resumo ciclo: redes=%d; pools=%d; verificações_GoPlus=%d; aprovados=%d.",
+             len(network_summary), sum(x["pools"] for x in network_summary.values()),
+             sum(x["security_checked"] for x in network_summary.values()), len(alerts))
     return alerts
