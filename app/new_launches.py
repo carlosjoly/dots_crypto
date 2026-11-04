@@ -52,6 +52,8 @@ def _retry_after_seconds(response):
 
 
 def _record_api_metric(url, status, attempt, retry_after=None, wait_seconds=0):
+    if not isinstance(status, int):
+        status = None
     network_slug = url.split("/networks/")[-1].split("/")[0] if "/networks/" in url else "N/D"
     record = {
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
