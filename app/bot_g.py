@@ -306,6 +306,21 @@ def run_bot_g_observer(cfg, now=None, force_collection=False):
     snapshots = fetch_social_snapshots(SOCIAL_SYMBOLS, api_key, now=now)
     if not snapshots:
         raise RuntimeError("LunarCrush não retornou ativos sociais monitorados; histórico não atualizado.")
+    unexpected = set(snapshots) - set(SOCIAL_SYMBOLS)
+    if unexpected:
+        raise RuntimeError(f"LunarCrush retornou símbolos não monitorados: {sorted(unexpected)}")
+    missing = sorted(set(SOCIAL_SYMBOLS) - set(snapshots))
+    if missing:
+        log.warning("Bot G cobertura parcial: ativos ausentes=%s; nenhum dado ausente será inferido.", ",".join(missing))
+    state["last_collection_quality"] = {
+        "collected_at": now.isoformat(),
+        "expected_assets": len(SOCIAL_SYMBOLS),
+        "received_assets": len(snapshots),
+        "missing_assets": missing,
+        "source_freshness_unknown_assets": sorted(
+            symbol for symbol, item in snapshots.items() if not item.get("source_updated_at")
+        ),
+    }
 
     cutoff = now - HISTORY_RETENTION
     for symbol, snapshot in snapshots.items():
