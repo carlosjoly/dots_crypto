@@ -54,7 +54,7 @@ class BotFGeckoTerminalTests(unittest.TestCase):
             get.side_effect = [throttled, success]
             with patch("app.new_launches.API_METRICS_PATH", metrics):
                 self.assertEqual(
-                    _get_json("https://api.geckoterminal.com/api/v2/networks/avax/new_pools"),
+                    _get_json("https://api.geckoterminal.com/api/v2/networks/avax/new_pools", params={"page": 1}),
                     {"data": []},
                 )
             records = [json.loads(line) for line in metrics.read_text().splitlines()]
