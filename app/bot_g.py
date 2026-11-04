@@ -110,7 +110,39 @@ def _check_link_goplus(state, now, env):
         return result
 
 
-def _signal_for_snapshot(symbol, snapshot, previous):
+def _snapshot_quality(snapshot, now):
+    """Validate local collection time and provider freshness without conflating them."""
+    collected_at = _parse_time(snapshot.get("collected_at"))
+    if collected_at is None:
+        return "invalid_collection_timestamp", "horário de coleta ausente ou inválido"
+    collection_age = (now - collected_at).total_seconds()
+    if collection_age < -300:
+        return "invalid_collection_timestamp", "horário de coleta está mais de 5 minutos no futuro"
+    if collection_age > 600:
+        return "stale_collection", f"snapshot chegou com {collection_age:.0f}s de atraso"
+    try:
+        volume = float(snapshot.get("social_volume_24h"))
+        sentiment = float(snapshot.get("sentiment"))
+    except (TypeError, ValueError):
+        return "invalid_metrics", "volume social ou sentimento ausente/inválido"
+    if not (volume >= 0 and volume < float("inf") and 0 <= sentiment <= 100):
+        return "invalid_metrics", "volume social ou sentimento fora dos limites válidos"
+
+    source_updated = snapshot.get("source_updated_at")
+    if source_updated is None:
+        return "unknown", "fonte não fornece timestamp verificável das métricas sociais"
+    source_time = _parse_time(source_updated)
+    if source_time is None:
+        return "invalid_source_timestamp", "timestamp da fonte inválido"
+    source_age = (now - source_time).total_seconds()
+    if source_age < -300:
+        return "invalid_source_timestamp", "timestamp da fonte está no futuro"
+    if source_age > 7200:
+        return "stale_source", f"métrica da fonte tem {source_age:.0f}s; limite de frescor=7200s"
+    return "verified_fresh", f"métrica da fonte atualizada há {max(0, source_age):.0f}s"
+
+
+def _signal_for_snapshot(symbol, snapshot, previous, freshness_status="unknown"):
     """Return (alert, rejection_reason) with explicit per-asset decision outcomes.
 
     On an asset's first observation, extreme sentiment may produce a preliminary
@@ -166,7 +198,12 @@ def _signal_for_snapshot(symbol, snapshot, previous):
         "social_sentiment": sentiment,
         "social_volume_24h": volume,
         "social_volume_acceleration_pct": acceleration,
-        "source_freshness_verified": bool(snapshot.get("source_freshness_verified", False)),
+        "source_freshness_verified": freshness_status == "verified_fresh",
+        "source_freshness_status": freshness_status,
+        "social_contributors": snapshot.get("social_contributors"),
+        "spam": snapshot.get("spam"),
+        "bot_ratio_pct": snapshot.get("bot_ratio_pct"),
+        "source_updated_at": snapshot.get("source_updated_at"),
         "source": "LunarCrush",
     }
     return alert, None
@@ -189,7 +226,17 @@ def _emit_social_alerts(cfg, state, snapshots, now):
         # The current snapshot is appended before signal evaluation. Exclude it
         # from the baseline; only an earlier observation may confirm acceleration.
         previous = history[-2] if len(history) >= 2 else None
-        alert, rejection_reason = _signal_for_snapshot(symbol, snapshot, previous)
+        freshness_status, quality_reason = _snapshot_quality(snapshot, now)
+        if freshness_status in {"invalid_collection_timestamp", "stale_collection", "invalid_metrics",
+                                "invalid_source_timestamp", "stale_source"}:
+            log.warning("Bot G decisão %s: DESCARTADO — qualidade/frescor inválido (%s): %s.",
+                        symbol, freshness_status, quality_reason)
+            continue
+        log.info("Bot G qualidade %s: freshness=%s; %s; contributors=%s; spam=%s; bot_ratio=%s.",
+                 symbol, freshness_status, quality_reason,
+                 snapshot.get("social_contributors", "N/D"),
+                 snapshot.get("spam", "N/D"), snapshot.get("bot_ratio_pct", "N/D"))
+        alert, rejection_reason = _signal_for_snapshot(symbol, snapshot, previous, freshness_status)
         if rejection_reason:
             log.info("Bot G decisão %s: DESCARTADO — %s.", symbol, rejection_reason)
             continue
@@ -271,9 +318,12 @@ def run_bot_g_observer(cfg, now=None, force_collection=False):
             if _parse_time(item.get("collected_at")) and _parse_time(item.get("collected_at")) >= cutoff
         ][-200:]
         log.info(
-            "Bot G social %s: volume_24h=%s; sentiment=%s; freshness=%s; contributors/spam/bot_ratio=N/D",
+            "Bot G social %s: volume_24h=%s; sentiment=%s; source_updated_at=%s; freshness=%s; contributors=%s; spam=%s; bot_ratio=%s",
             symbol, snapshot["social_volume_24h"], snapshot["sentiment"],
+            snapshot.get("source_updated_at"),
             "verificada" if snapshot.get("source_freshness_verified") else "não verificada",
+            snapshot.get("social_contributors", "N/D"), snapshot.get("spam", "N/D"),
+            snapshot.get("bot_ratio_pct", "N/D"),
         )
 
     alert_result = _emit_social_alerts(cfg, state, snapshots, now)
