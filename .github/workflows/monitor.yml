@@ -35,6 +35,13 @@ jobs:
           key: bot-f-seen-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
             bot-f-seen-${{ runner.os }}-${{ github.ref_name }}-
+      - name: Restore Bot F API telemetry
+        uses: actions/cache@v4
+        with:
+          path: data/bot_f_api_metrics.jsonl
+          key: bot-f-api-metrics-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            bot-f-api-metrics-${{ runner.os }}-${{ github.ref_name }}-
       - name: Restore Bot G social history
         uses: actions/cache@v4
         with:
