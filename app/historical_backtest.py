@@ -1,4 +1,4 @@
-"""Download historical Binance Spot candles and run a non-overlapping event study.
+"""Download historical Binance Spot candles and run a point-in-time event study.
 
 This is an event study, not a portfolio simulator: every signal is evaluated
 independently. Entry is the next candle open; exits are fixed-horizon closes.
@@ -6,7 +6,6 @@ independently. Entry is the next candle open; exits are fixed-horizon closes.
 import argparse
 import json
 import logging
-import math
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -20,6 +19,7 @@ from .indicators import enrich
 
 log = logging.getLogger("dot_cripto.backtest")
 BASE_INTERVAL_MS = {"15m": 900_000, "1h": 3_600_000, "4h": 14_400_000}
+BARS_PER_24H = {"15m": 96, "1h": 24, "4h": 6}
 COLUMNS = ["open_time", "open", "high", "low", "close", "volume", "close_time",
            "quote_volume", "trades", "taker_buy_base", "taker_buy_quote", "ignore"]
 HORIZONS = (1, 4, 16, 48)
@@ -66,8 +66,10 @@ def download_historical_klines(base_url, symbol, interval, start_ms, end_ms, ses
     frame = frame[frame["close_time"] < pd.Timestamp.now(tz="UTC")].copy().reset_index(drop=True)
     if frame.empty:
         raise ValueError(f"Historical sample contains no fully closed candles: {symbol} {interval}")
-    if frame[["open", "high", "low", "close", "volume"]].isna().any().any():
+    if frame[["open", "high", "low", "close", "volume", "quote_volume"]].isna().any().any():
         raise ValueError(f"Historical candles contain invalid numeric values: {symbol} {interval}")
+    if (frame[["open", "high", "low", "close"]] <= 0).any().any() or (frame[["volume", "quote_volume"]] < 0).any().any():
+        raise ValueError(f"Historical candles contain out-of-range numeric values: {symbol} {interval}")
     expected = pd.Timedelta(milliseconds=BASE_INTERVAL_MS[interval])
     gaps = frame["open_time"].diff().dropna()
     if not gaps.eq(expected).all():
@@ -105,9 +107,16 @@ def _split_for_index(index, count):
 def event_study(symbol, timeframe, candles, cfg, fee_per_side_pct=0.10,
                 slippage_per_side_pct=0.05):
     enriched = enrich(candles)
+    if "quote_volume" not in enriched.columns:
+        raise ValueError("Historical candles lack quote_volume; live liquidity filter cannot be approximated.")
+    bars_24h = BARS_PER_24H[timeframe]
+    enriched["quote_volume_24h_usdt"] = enriched["quote_volume"].rolling(bars_24h).sum()
+    minimum_quote_volume = float(cfg["exchange"]["min_quote_volume_24h_usdt"])
     records = []
-    first_signal_index = 54
+    first_signal_index = max(54, bars_24h - 1)
     for index in range(first_signal_index, len(enriched) - max(HORIZONS)):
+        if float(enriched.iloc[index]["quote_volume_24h_usdt"]) < minimum_quote_volume:
+            continue
         split, split_end = _split_for_index(index, len(enriched))
         alerts = run_market_agents_enriched(
             symbol, timeframe, enriched.iloc[:index + 1], cfg
@@ -220,6 +229,7 @@ def run(days=180, fee_per_side_pct=0.10, slippage_per_side_pct=0.05):
         "round_trip_cost_pct_assumption": 2 * (fee_per_side_pct + slippage_per_side_pct),
         "horizons_bars": list(HORIZONS),
         "splits": {"train": "first 60%", "validation": "next 20%", "test": "last 20%"},
+        "historical_market_filter": "24h quote volume is approximated from candle quote_volume; historical bid/ask spread is unavailable and therefore not reconstructed. Results are not an exact replay of live symbol eligibility.",
         "warning": "Signals are evaluated independently and may overlap. Results are not portfolio returns or calibrated probabilities.",
         "summary": summary,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
