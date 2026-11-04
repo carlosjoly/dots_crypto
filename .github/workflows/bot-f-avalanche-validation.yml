@@ -11,8 +11,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
+      - name: Require the validation branch
+        if: github.ref != 'refs/heads/test/bot-f-avalanche-pagination-quality'
+        run: |
+          echo "::error::Selecione a branch test/bot-f-avalanche-pagination-quality no menu Run workflow."
+          exit 1
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -20,7 +27,9 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Validate GeckoTerminal Avalanche endpoint
+      - name: Run Bot F unit and regression tests
+        run: python -m unittest tests.test_bot_f_gecko -v
+      - name: Validate GeckoTerminal Avalanche pagination and data quality
         run: python -m app.validate_bot_f_avalanche
       - name: Upload validation evidence
         if: always()
