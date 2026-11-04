@@ -58,7 +58,14 @@ def download_historical_klines(base_url, symbol, interval, start_ms, end_ms, ses
         frame[column] = pd.to_numeric(frame[column], errors="coerce")
     frame["open_time"] = pd.to_datetime(frame["open_time"], unit="ms", utc=True)
     frame["close_time"] = pd.to_datetime(frame["close_time"], unit="ms", utc=True)
-    frame = frame.drop_duplicates(subset=["open_time"]).sort_values("open_time").reset_index(drop=True)
+    if frame["open_time"].duplicated().any():
+        raise ValueError(f"Historical sample contains duplicate candles: {symbol} {interval}")
+    if not frame["open_time"].is_monotonic_increasing:
+        raise ValueError(f"Historical sample is not ordered: {symbol} {interval}")
+    frame = frame.reset_index(drop=True)
+    frame = frame[frame["close_time"] < pd.Timestamp.now(tz="UTC")].copy().reset_index(drop=True)
+    if frame.empty:
+        raise ValueError(f"Historical sample contains no fully closed candles: {symbol} {interval}")
     if frame[["open", "high", "low", "close", "volume"]].isna().any().any():
         raise ValueError(f"Historical candles contain invalid numeric values: {symbol} {interval}")
     expected = pd.Timedelta(milliseconds=BASE_INTERVAL_MS[interval])
