@@ -30,8 +30,6 @@ class BotFGeckoTerminalTests(unittest.TestCase):
             "https://api.geckoterminal.com/api/v2/networks/avax/new_pools",
         )
 
-    @patch("app.new_launches.time.sleep")
-    @patch("app.new_launches.requests.get")
     def test_missing_pool_address_falls_back_to_valid_resource_id_suffix(self):
         address = "0x" + "a" * 40
         payload = {
@@ -62,6 +60,8 @@ class BotFGeckoTerminalTests(unittest.TestCase):
         self.assertEqual(pools[0]["pool_address"], explicit)
         self.assertEqual(pools[0]["pool_address_source"], "api_attribute")
 
+    @patch("app.new_launches.time.sleep")
+    @patch("app.new_launches.requests.get")
     def test_429_respects_retry_after_and_retries(self, get, sleep):
         get.side_effect = [
             response(429, headers={"Retry-After": "17"}),
