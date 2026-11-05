@@ -131,6 +131,26 @@ class ActiveAgentSignalTests(unittest.TestCase):
     def test_agents_require_at_least_55_candles(self):
         self.assertEqual(self.agents(frame().iloc[:54].copy()), [])
 
+    def test_bot_e_long_target_uses_configured_risk_reward(self):
+        cfg = {"thresholds": {**CFG["thresholds"], "min_risk_reward": 2.0}}
+        data = frame(sma20=99.0, sma50=98.0, rsi14=50.0, rel_volume=1.0, atr14=2.0)
+        alerts = run_market_agents_enriched("BTCUSDT", "4h", data, cfg)
+        alert = next(x for x in alerts if x["agent"] == "Bot E — Swing trade")
+        self.assertIn("objetivo ilustrativo: 106", alert["reason"])
+
+    def test_bot_e_short_target_uses_configured_risk_reward(self):
+        cfg = {"thresholds": {**CFG["thresholds"], "min_risk_reward": 2.0}}
+        data = frame(sma20=101.0, sma50=102.0, rsi14=50.0, rel_volume=1.0, atr14=2.0)
+        alerts = run_market_agents_enriched("BTCUSDT", "4h", data, cfg)
+        alert = next(x for x in alerts if x["agent"] == "Bot E — Swing trade")
+        self.assertIn("objetivo ilustrativo: 94", alert["reason"])
+
+    def test_bot_e_rejects_non_positive_risk_reward_configuration(self):
+        cfg = {"thresholds": {**CFG["thresholds"], "min_risk_reward": 0}}
+        data = frame(sma20=99.0, sma50=98.0, rsi14=50.0, rel_volume=1.0)
+        with self.assertRaisesRegex(ValueError, "greater than zero"):
+            run_market_agents_enriched("BTCUSDT", "4h", data, cfg)
+
 
 if __name__ == "__main__":
     unittest.main()
