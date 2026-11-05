@@ -32,6 +32,36 @@ class BotFGeckoTerminalTests(unittest.TestCase):
 
     @patch("app.new_launches.time.sleep")
     @patch("app.new_launches.requests.get")
+    def test_missing_pool_address_falls_back_to_valid_resource_id_suffix(self):
+        address = "0x" + "a" * 40
+        payload = {
+            "data": [
+                {"id": f"avax_{address}", "attributes": {"address": None}},
+                {"id": f"avax_{'b' * 40}", "attributes": {"address": None}},
+            ],
+            "included": [],
+        }
+        with patch("app.new_launches._get_json", return_value=payload):
+            pools = fetch_new_pools("avalanche")
+        self.assertEqual(pools[0]["pool_address"], address)
+        self.assertEqual(pools[0]["pool_address_source"], "resource_id_fallback")
+        self.assertIsNone(pools[1]["pool_address"])
+        self.assertEqual(pools[1]["pool_address_source"], "missing_or_invalid")
+
+    def test_explicit_valid_pool_address_takes_precedence_over_resource_id(self):
+        explicit = "0x" + "c" * 40
+        derived = "0x" + "d" * 40
+        payload = {
+            "data": [
+                {"id": f"avax_{derived}", "attributes": {"address": explicit}},
+            ],
+            "included": [],
+        }
+        with patch("app.new_launches._get_json", return_value=payload):
+            pools = fetch_new_pools("avalanche")
+        self.assertEqual(pools[0]["pool_address"], explicit)
+        self.assertEqual(pools[0]["pool_address_source"], "api_attribute")
+
     def test_429_respects_retry_after_and_retries(self, get, sleep):
         get.side_effect = [
             response(429, headers={"Retry-After": "17"}),
