@@ -174,6 +174,37 @@ class BotFGeckoTerminalTests(unittest.TestCase):
         self.assertEqual(result["field_quality"]["pool_address"]["coverage_pct"], 100.0)
         self.assertFalse(result["spread_data_available"])
 
+    def test_avalanche_validator_records_resource_id_format_and_missing_reason(self):
+        bad = {"pool_id": "avax_0x" + "a" * 64, "pool_address": None,
+               "pool_address_source": "missing_or_invalid"}
+        with patch.object(avalanche_validation, "fetch_new_pools", return_value=[bad]), \
+             patch.object(avalanche_validation, "search_pools_by_resource_id", return_value={"data": []}), \
+             patch.object(avalanche_validation.time, "sleep"):
+            result = avalanche_validation.validate()
+        diag = result["address_diagnostics"][0]
+        self.assertEqual(diag["resource_id_suffix_format"], "hex_32_bytes")
+        self.assertEqual(diag["resource_id_suffix_hex_length"], 64)
+        self.assertEqual(diag["pool_address_source"], "missing_or_invalid")
+        self.assertEqual(diag["address_lookup_status"], "no_exact_match")
+
+    def test_avalanche_validator_accepts_only_exact_search_id_and_valid_address(self):
+        pool_id = "avax_0x" + "b" * 64
+        candidate = "0x" + "c" * 40
+        pool = {"pool_id": pool_id, "pool_address": None, "pool_address_source": "missing_or_invalid"}
+        search_result = {"data": [
+            {"id": "avax_0x" + "d" * 64, "attributes": {"address": candidate}},
+            {"id": pool_id, "attributes": {"address": candidate}},
+        ]}
+        with patch.object(avalanche_validation, "fetch_new_pools", return_value=[pool]), \
+             patch.object(avalanche_validation, "search_pools_by_resource_id", return_value=search_result), \
+             patch.object(avalanche_validation.time, "sleep"):
+            result = avalanche_validation.validate()
+        diag = result["address_diagnostics"][0]
+        self.assertEqual(diag["address_lookup_exact_match_count"], 1)
+        self.assertEqual(diag["address_lookup_status"], "exact_match_valid_address")
+        self.assertEqual(diag["pool_address_source"], "gecko_search_exact_match")
+        self.assertEqual(diag["pool_address"], candidate)
+
     def test_avalanche_validator_reports_missing_quality_fields(self):
         incomplete = {"pool_id": "avax_incomplete", "pool_address": "not-an-address"}
         with patch.object(avalanche_validation, "fetch_new_pools", return_value=[incomplete]), \
