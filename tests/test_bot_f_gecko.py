@@ -207,8 +207,8 @@ class BotFGeckoTerminalTests(unittest.TestCase):
             "pagination_complete": False,
             "resolved_gecko_slug": "avax",
         }
-        with tempfile.TemporaryDirectory() as directory, \\
-             patch.object(avalanche_validation, "validate", return_value=incomplete), \\
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(avalanche_validation, "validate", return_value=incomplete), \
              patch.object(avalanche_validation, "OUTPUT_PATH", Path(directory) / "result.json"):
             self.assertEqual(avalanche_validation.main(), 1)
 
