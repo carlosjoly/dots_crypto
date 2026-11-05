@@ -76,9 +76,29 @@ class ActiveAgentSignalTests(unittest.TestCase):
         data.loc[54, "volume"] = 100.0
         self.assertNotIn("Bot C — Reversões", self.agents(data))
 
+    def test_bot_c_overbought_reversal_requires_negative_candle_and_higher_volume(self):
+        data = frame(rsi14=70.1, change_pct=-0.2)
+        data.loc[53, "close"] = 100.0
+        data.loc[54, "close"] = 99.8
+        data.loc[53, "volume"] = 100.0
+        data.loc[54, "volume"] = 101.0
+        self.assertIn("Bot C — Reversões", self.agents(data))
+
+    def test_bot_a_uses_the_configured_threshold_for_each_timeframe(self):
+        expected = {"15m": 1.8, "1h": 3.5, "4h": 6.0}
+        for timeframe, threshold in expected.items():
+            with self.subTest(timeframe=timeframe):
+                data = frame(change_pct=threshold, rel_volume=1.8, rsi14=75.0)
+                self.assertIn("Bot A — Altas expressivas", self.agents(data, timeframe))
+
     def test_bot_d_upside_breakout_uses_prior_lookback_and_relative_volume(self):
         data = frame(change_pct=0.2, rel_volume=1.8, rsi14=75.0)
         data.loc[54, "close"] = 111.0
+        self.assertIn("Bot D — Rompimentos", self.agents(data))
+
+    def test_bot_d_downside_breakout_uses_prior_lookback_and_relative_volume(self):
+        data = frame(change_pct=-0.2, rel_volume=1.8, rsi14=25.0)
+        data.loc[54, "close"] = 89.0
         self.assertIn("Bot D — Rompimentos", self.agents(data))
 
     def test_bot_d_does_not_trigger_without_relative_volume_confirmation(self):
@@ -92,6 +112,10 @@ class ActiveAgentSignalTests(unittest.TestCase):
         alert = next(x for x in alerts if x["agent"] == "Bot E — Swing trade")
         self.assertIn("Invalidação indicativa: 97", alert["reason"])
         self.assertIn("objetivo ilustrativo: 104", alert["reason"])
+
+    def test_bot_e_requires_minimum_relative_volume(self):
+        data = frame(sma20=99.0, sma50=98.0, rsi14=50.0, rel_volume=0.99)
+        self.assertNotIn("Bot E — Swing trade", self.agents(data))
 
     def test_bot_e_downtrend_emits_bearish_setup(self):
         data = frame(sma20=101.0, sma50=102.0, rsi14=50.0, rel_volume=1.0)
