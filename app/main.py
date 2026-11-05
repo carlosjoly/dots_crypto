@@ -18,7 +18,31 @@ def _append_jsonl(path, record):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+        handle.write(json.dumps(record, ensure_ascii=False, default=str) + "\\n")
+
+
+def process_active_market_agents(cfg, base, candidates):
+    """Run Bots A-E; continue after isolated errors but report an incomplete cycle."""
+    sent = 0
+    failures = []
+    for symbol, market_snapshot in candidates.items():
+        for tf in cfg["exchange"]["timeframes"]:
+            try:
+                candles = get_klines(base, symbol, tf, int(cfg["exchange"]["candle_limit"]))
+                alerts = run_market_agents(symbol, tf, candles, cfg)
+                for alert in alerts:
+                    alert["spread_pct"] = market_snapshot["spread_pct"]
+                    alert["best_bid"] = market_snapshot["bid"]
+                    alert["best_ask"] = market_snapshot["ask"]
+                    alert["market_filter_snapshot_utc"] = market_snapshot["collected_at_utc"]
+                    alert["market_filter_max_spread_pct"] = float(cfg["exchange"]["max_spread_pct"])
+                    emit_alert(cfg, alert)
+                    sent += 1
+                    log.info("Alerta: %s %s %s; spread=%.5f%%", alert["agent"], symbol, tf, alert["spread_pct"])
+            except Exception as exc:
+                failures.append({"symbol": symbol, "timeframe": tf, "error": type(exc).__name__})
+                log.exception("Falha no ciclo do símbolo/timeframe %s %s", symbol, tf)
+    return sent, failures
 
 
 def main():
@@ -26,11 +50,13 @@ def main():
     setup_logging(cfg["_root"])
     base = cfg["exchange"]["base_url"]
     diagnostics_path = Path(cfg["_root"]) / "data" / "market_filter_audit.jsonl"
+    cycle_failures = []
     try:
         tickers = get_24h_tickers(base)
-    except Exception:
+    except Exception as exc:
         log.exception("Falha na coleta global de tickers; abortando coleta de mercado deste ciclo.")
         tickers = {}
+        cycle_failures.append({"stage": "global_tickers", "error": type(exc).__name__})
 
     candidates = {}
     for symbol in cfg["exchange"]["symbols"]:
@@ -41,6 +67,8 @@ def main():
                 "collected_at_utc": datetime.now(timezone.utc).isoformat(),
                 "symbol": symbol, "decision": "rejected", "reason": "ticker_24h_missing",
             })
+            if not cycle_failures:
+                cycle_failures.append({"stage": "symbol_ticker", "symbol": symbol, "error": "ticker_24h_missing"})
             continue
         try:
             qv = float(t.get("quoteVolume", 0))
@@ -74,29 +102,17 @@ def main():
                 "quote_volume_24h_usdt": qv, **book, "max_spread_pct": max_spread,
             })
         except Exception as exc:
+            cycle_failures.append({"stage": "market_filter", "symbol": symbol, "error": type(exc).__name__})
             log.exception("Falha nos filtros de mercado para %s", symbol)
             _append_jsonl(diagnostics_path, {
                 "collected_at_utc": datetime.now(timezone.utc).isoformat(),
                 "symbol": symbol, "decision": "error", "reason": type(exc).__name__,
             })
 
-    sent = 0
-    for symbol, market_snapshot in candidates.items():
-        for tf in cfg["exchange"]["timeframes"]:
-            try:
-                candles = get_klines(base, symbol, tf, int(cfg["exchange"]["candle_limit"]))
-                alerts = run_market_agents(symbol, tf, candles, cfg)
-                for alert in alerts:
-                    alert["spread_pct"] = market_snapshot["spread_pct"]
-                    alert["best_bid"] = market_snapshot["bid"]
-                    alert["best_ask"] = market_snapshot["ask"]
-                    alert["market_filter_snapshot_utc"] = market_snapshot["collected_at_utc"]
-                    alert["market_filter_max_spread_pct"] = float(cfg["exchange"]["max_spread_pct"])
-                    emit_alert(cfg, alert)
-                    sent += 1
-                    log.info("Alerta: %s %s %s; spread=%.5f%%", alert["agent"], symbol, tf, alert["spread_pct"])
-            except Exception:
-                log.exception("Falha no ciclo do símbolo/timeframe %s %s", symbol, tf)
+    sent, market_failures = process_active_market_agents(cfg, base, candidates)
+    cycle_failures.extend(
+        {"stage": "active_agent_cycle", **failure} for failure in market_failures
+    )
 
     if cfg.get("launches", {}).get("enabled", False):
         try:
@@ -121,7 +137,11 @@ def main():
 
     for status in disabled_agent_status(cfg):
         log.info("%s: %s — %s", status["agent"], status["status"], status["reason"])
-    log.info("Ciclo concluído. Símbolos elegíveis=%d, alertas=%d", len(candidates), sent)
+    log.info("Ciclo concluído. Símbolos elegíveis=%d, alertas=%d, falhas críticas A-E=%d",
+             len(candidates), sent, len(cycle_failures))
+    if cycle_failures:
+        log.error("Ciclo A-E incompleto: %s", json.dumps(cycle_failures, ensure_ascii=False))
+        return 1
     return 0
 
 
