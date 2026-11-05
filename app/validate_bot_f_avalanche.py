@@ -12,6 +12,7 @@ from .new_launches import (
     _created_at,
     _number,
     fetch_new_pools,
+    search_pools_by_resource_id,
     gecko_network_id,
 )
 
@@ -81,6 +82,7 @@ def validate():
         "unique_pool_count": 0,
         "duplicate_pool_count": 0,
         "sample_pool_ids": [],
+        "address_diagnostics": [],
         "page_results": [],
         "quality_status": "not_evaluated",
         "field_quality": {},
@@ -152,6 +154,59 @@ def validate():
         result["pagination_status"] = "partial_failure" if result["pages_completed"] else "failed"
         result["error"] = f"{type(exc).__name__}: {str(exc)[:240]}"
         log.exception("Avalanche pagination validation failed.")
+
+    # Exact-ID lookup only; never infer a pool address from a hash-shaped ID.
+    for pool in all_pools:
+        pool_id = str(pool.get("pool_id") or "")
+        suffix = pool_id[len("avax_"):] if pool_id.startswith("avax_") else ""
+        suffix_hex = suffix[2:] if suffix.startswith("0x") else ""
+        suffix_len = len(suffix_hex) if re.fullmatch(r"[0-9a-fA-F]+", suffix_hex) else None
+        current_address = pool.get("pool_address")
+        source = pool.get("pool_address_source") or (
+            "api_attribute" if ADDRESS_RE.fullmatch(str(current_address or "")) else "missing_or_invalid"
+        )
+        diag = {
+            "pool_id": pool_id or None,
+            "resource_id_prefix_matches": pool_id.startswith("avax_"),
+            "resource_id_suffix_format": (
+                "evm_address_20_bytes" if suffix_len == 40 else
+                "hex_32_bytes" if suffix_len == 64 else "other_or_non_hex"
+            ),
+            "resource_id_suffix_hex_length": suffix_len,
+            "pool_address_source": source,
+            "pool_address": current_address if ADDRESS_RE.fullmatch(str(current_address or "")) else None,
+            "address_lookup_source": None,
+            "address_lookup_status": "not_needed",
+            "address_lookup_exact_match_count": 0,
+        }
+        if not ADDRESS_RE.fullmatch(str(current_address or "")):
+            diag["address_lookup_source"] = "geckoterminal_search_pools"
+            try:
+                payload = search_pools_by_resource_id("avalanche", pool_id)
+                rows = payload.get("data", []) if isinstance(payload, dict) else []
+                exact = [row for row in rows if isinstance(row, dict) and row.get("id") == pool_id]
+                valid = [
+                    (row.get("attributes") or {}).get("address")
+                    for row in exact
+                    if ADDRESS_RE.fullmatch(str((row.get("attributes") or {}).get("address") or ""))
+                ]
+                diag["address_lookup_exact_match_count"] = len(exact)
+                if len(valid) == 1:
+                    pool["pool_address"] = valid[0]
+                    pool["pool_address_source"] = "gecko_search_exact_match"
+                    diag["pool_address"] = valid[0]
+                    diag["pool_address_source"] = "gecko_search_exact_match"
+                    diag["address_lookup_status"] = "exact_match_valid_address"
+                elif len(valid) > 1:
+                    diag["address_lookup_status"] = "ambiguous_exact_matches"
+                elif exact:
+                    diag["address_lookup_status"] = "exact_match_without_valid_address"
+                else:
+                    diag["address_lookup_status"] = "no_exact_match"
+            except Exception as exc:
+                diag["address_lookup_status"] = "lookup_error"
+                diag["address_lookup_error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
+        result["address_diagnostics"].append(diag)
 
     result["unique_pool_count"] = len(all_pools)
     result["sample_pool_ids"] = [
