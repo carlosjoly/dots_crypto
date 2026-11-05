@@ -18,7 +18,7 @@ def _append_jsonl(path, record):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(record, ensure_ascii=False, default=str) + "\\n")
+        handle.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
 
 
 def process_active_market_agents(cfg, base, candidates):
@@ -67,8 +67,7 @@ def main():
                 "collected_at_utc": datetime.now(timezone.utc).isoformat(),
                 "symbol": symbol, "decision": "rejected", "reason": "ticker_24h_missing",
             })
-            if not cycle_failures:
-                cycle_failures.append({"stage": "symbol_ticker", "symbol": symbol, "error": "ticker_24h_missing"})
+            cycle_failures.append({"stage": "symbol_ticker", "symbol": symbol, "error": "ticker_24h_missing"})
             continue
         try:
             qv = float(t.get("quoteVolume", 0))
