@@ -208,6 +208,7 @@ class BotFGeckoTerminalTests(unittest.TestCase):
     def test_avalanche_validator_reports_missing_quality_fields(self):
         incomplete = {"pool_id": "avax_incomplete", "pool_address": "not-an-address"}
         with patch.object(avalanche_validation, "fetch_new_pools", return_value=[incomplete]), \
+             patch.object(avalanche_validation, "search_pools_by_resource_id", return_value={"data": []}), \
              patch.object(avalanche_validation.time, "sleep"):
             result = avalanche_validation.validate()
         self.assertEqual(result["quality_status"], "measured")
