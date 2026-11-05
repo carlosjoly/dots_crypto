@@ -158,9 +158,26 @@ def fetch_new_pools(network, page=1):
         base = included.get(base_id, {}).get("attributes") or {}
         quote = included.get(quote_id, {}).get("attributes") or {}
         dex = included.get(dex_id, {}).get("attributes") or {}
+        # GeckoTerminal resource IDs use "<network>_<pool-address>". Prefer
+        # the explicit attribute, but recover a missing/invalid address only when
+        # the resource ID has the exact network prefix and a valid EVM address.
+        raw_pool_address = attrs.get("address")
+        pool_address_source = "api_attribute"
+        if not re.fullmatch(r"0x[a-fA-F0-9]{40}", str(raw_pool_address or "")):
+            resource_id = str(item.get("id") or "")
+            prefix = f"{gecko_network}_"
+            candidate = resource_id[len(prefix):] if resource_id.startswith(prefix) else ""
+            if re.fullmatch(r"0x[a-fA-F0-9]{40}", candidate):
+                raw_pool_address = candidate
+                pool_address_source = "resource_id_fallback"
+            else:
+                raw_pool_address = None
+                pool_address_source = "missing_or_invalid"
+
         pools.append({
             "pool_id": item.get("id"),
-            "pool_address": attrs.get("address"),
+            "pool_address": raw_pool_address,
+            "pool_address_source": pool_address_source,
             "created_at": attrs.get("pool_created_at"),
             "liquidity_usd": attrs.get("reserve_in_usd"),
             "volume_24h_usd": (attrs.get("volume_usd") or {}).get("h24"),
