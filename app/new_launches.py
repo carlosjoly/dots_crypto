@@ -51,17 +51,22 @@ def _retry_after_seconds(response):
             return None
 
 
-def _record_api_metric(url, status, attempt, retry_after=None, wait_seconds=0):
+def _record_api_metric(url, status, attempt, retry_after=None, wait_seconds=0,
+                       params=None, latency_ms=None, error_type=None):
     if not isinstance(status, int):
         status = None
     network_slug = url.split("/networks/")[-1].split("/")[0] if "/networks/" in url else "N/D"
     record = {
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "network_slug": network_slug,
+        "endpoint": url.split(GECKO_BASE, 1)[-1].split("?", 1)[0],
+        "page": (params or {}).get("page"),
         "status": status,
         "attempt": attempt + 1,
         "retry_after_seconds": retry_after,
         "wait_seconds": round(float(wait_seconds), 3),
+        "latency_ms": round(float(latency_ms), 2) if latency_ms is not None else None,
+        "error_type": error_type,
     }
     API_METRICS_PATH.parent.mkdir(parents=True, exist_ok=True)
     with API_METRICS_PATH.open("a", encoding="utf-8") as handle:
@@ -69,42 +74,74 @@ def _record_api_metric(url, status, attempt, retry_after=None, wait_seconds=0):
 
 
 def _get_json(url, params=None):
-    """GET JSON with bounded backoff for rate limits and transient server errors."""
+    """GET JSON with bounded backoff and per-response observability."""
     retryable_statuses = {429, 500, 502, 503, 504}
     for attempt in range(MAX_RETRIES + 1):
+        started = time.monotonic()
         try:
             response = requests.get(
                 url, params=params,
                 headers={"Accept": GECKO_ACCEPT, "User-Agent": "DotCripto-BotF/1.0"},
                 timeout=TIMEOUT,
             )
+            latency_ms = (time.monotonic() - started) * 1000
             response.raise_for_status()
-            _record_api_metric(url, response.status_code, attempt)
+            _record_api_metric(url, response.status_code, attempt, params=params,
+                               latency_ms=latency_ms)
             return response.json()
         except requests.exceptions.HTTPError as exc:
+            latency_ms = (time.monotonic() - started) * 1000
             response = exc.response
             status = getattr(response, "status_code", None)
             retry_after = _retry_after_seconds(response) if status == 429 else None
             if status not in retryable_statuses or attempt >= MAX_RETRIES:
-                _record_api_metric(url, status, attempt, retry_after, 0)
+                _record_api_metric(url, status, attempt, retry_after, 0, params,
+                                   latency_ms, type(exc).__name__)
                 raise
             exponential = REQUEST_INTERVAL_SECONDS * (2 ** attempt)
             wait = max(retry_after, MIN_RETRY_AFTER_SECONDS) if retry_after is not None else (
                 exponential + random.uniform(0, RETRY_JITTER_SECONDS)
             )
             network_slug = url.split("/networks/")[-1].split("/")[0] if "/networks/" in url else "N/D"
-            _record_api_metric(url, status, attempt, retry_after, wait)
+            _record_api_metric(url, status, attempt, retry_after, wait, params,
+                               latency_ms, type(exc).__name__)
             log.warning(
                 "GeckoTerminal rate_limit_retry network=%s status=%s; Retry-After=%s; "
                 "backoff_aplicado=%.2fs; tentativa=%d/%d.",
                 network_slug, status, retry_after, wait, attempt + 1, MAX_RETRIES,
             )
             time.sleep(wait)
+        except requests.exceptions.RequestException as exc:
+            latency_ms = (time.monotonic() - started) * 1000
+            if attempt >= MAX_RETRIES:
+                _record_api_metric(url, None, attempt, None, 0, params,
+                                   latency_ms, type(exc).__name__)
+                raise
+            wait = REQUEST_INTERVAL_SECONDS * (2 ** attempt) + random.uniform(0, RETRY_JITTER_SECONDS)
+            _record_api_metric(url, None, attempt, None, wait, params,
+                               latency_ms, type(exc).__name__)
+            log.warning(
+                "GeckoTerminal request_retry network=%s error=%s; "
+                "backoff_aplicado=%.2fs; tentativa=%d/%d.",
+                url.split("/networks/")[-1].split("/")[0] if "/networks/" in url else "N/D",
+                type(exc).__name__, wait, attempt + 1, MAX_RETRIES,
+            )
+            time.sleep(wait)
     raise RuntimeError("GeckoTerminal: limite de tentativas de rede excedido.")
+
 
 def gecko_network_id(network):
     """Resolve project network names to the exact GeckoTerminal network slug."""
     return GECKO_NETWORK_IDS.get(network, network)
+
+def search_pools_by_resource_id(network, pool_id):
+    """Search GeckoTerminal by the exact original resource ID; never derive an address."""
+    gecko_network = gecko_network_id(network)
+    return _get_json(
+        f"{GECKO_BASE}/search/pools",
+        params={"query": str(pool_id), "network": gecko_network},
+    )
+
 
 def fetch_new_pools(network, page=1):
     """Fetch recent pools plus token and DEX relationships from GeckoTerminal."""
@@ -130,9 +167,26 @@ def fetch_new_pools(network, page=1):
         base = included.get(base_id, {}).get("attributes") or {}
         quote = included.get(quote_id, {}).get("attributes") or {}
         dex = included.get(dex_id, {}).get("attributes") or {}
+        # GeckoTerminal resource IDs use "<network>_<pool-address>". Prefer
+        # the explicit attribute, but recover a missing/invalid address only when
+        # the resource ID has the exact network prefix and a valid EVM address.
+        raw_pool_address = attrs.get("address")
+        pool_address_source = "api_attribute"
+        if not re.fullmatch(r"0x[a-fA-F0-9]{40}", str(raw_pool_address or "")):
+            resource_id = str(item.get("id") or "")
+            prefix = f"{gecko_network}_"
+            candidate = resource_id[len(prefix):] if resource_id.startswith(prefix) else ""
+            if re.fullmatch(r"0x[a-fA-F0-9]{40}", candidate):
+                raw_pool_address = candidate
+                pool_address_source = "resource_id_fallback"
+            else:
+                raw_pool_address = None
+                pool_address_source = "missing_or_invalid"
+
         pools.append({
             "pool_id": item.get("id"),
-            "pool_address": attrs.get("address"),
+            "pool_address": raw_pool_address,
+            "pool_address_source": pool_address_source,
             "created_at": attrs.get("pool_created_at"),
             "liquidity_usd": attrs.get("reserve_in_usd"),
             "volume_24h_usd": (attrs.get("volume_usd") or {}).get("h24"),
