@@ -180,6 +180,8 @@ def validate():
             "address_lookup_exact_match_count": 0,
         }
         if not ADDRESS_RE.fullmatch(str(current_address or "")):
+            # Maintain GeckoTerminal public API cadence for each investigative lookup.
+            time.sleep(REQUEST_INTERVAL_SECONDS)
             diag["address_lookup_source"] = "geckoterminal_search_pools"
             try:
                 payload = search_pools_by_resource_id("avalanche", pool_id)
@@ -206,6 +208,19 @@ def validate():
             except Exception as exc:
                 diag["address_lookup_status"] = "lookup_error"
                 diag["address_lookup_error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
+        if diag["pool_address"] is None:
+            reason_map = {
+                "no_exact_match": "pool_address ausente/inválido na resposta original; busca por ID exato sem correspondência",
+                "exact_match_without_valid_address": "ID exato localizado, mas a resposta não contém endereço EVM válido",
+                "ambiguous_exact_matches": "mais de um endereço válido para o mesmo ID exato; resultado não adotado",
+                "lookup_error": "consulta complementar falhou; endereço permanece ausente",
+            }
+            diag["pool_address_reason"] = reason_map.get(
+                diag["address_lookup_status"],
+                "endereço ausente/inválido na resposta original; consulta complementar não conclusiva",
+            )
+        else:
+            diag["pool_address_reason"] = None
         result["address_diagnostics"].append(diag)
 
     result["unique_pool_count"] = len(all_pools)
