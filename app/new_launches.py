@@ -134,6 +134,15 @@ def gecko_network_id(network):
     """Resolve project network names to the exact GeckoTerminal network slug."""
     return GECKO_NETWORK_IDS.get(network, network)
 
+def search_pools_by_resource_id(network, pool_id):
+    """Search GeckoTerminal by the exact original resource ID; never derive an address."""
+    gecko_network = gecko_network_id(network)
+    return _get_json(
+        f"{GECKO_BASE}/search/pools",
+        params={"query": str(pool_id), "network": gecko_network},
+    )
+
+
 def fetch_new_pools(network, page=1):
     """Fetch recent pools plus token and DEX relationships from GeckoTerminal."""
     gecko_network = gecko_network_id(network)
