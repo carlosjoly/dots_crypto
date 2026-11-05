@@ -52,14 +52,17 @@ def run_market_agents_enriched(symbol, tf, d, cfg):
                           f"Fecho abaixo da mínima das {lookback} velas anteriores com volume relativo {rv:.2f}x; confirmar risco de falso rompimento."))
     trend_up = r["close"] > r["sma20"] > r["sma50"]
     trend_down = r["close"] < r["sma20"] < r["sma50"]
+    min_risk_reward = float(t.get("min_risk_reward", 1.5))
+    if min_risk_reward <= 0:
+        raise ValueError("thresholds.min_risk_reward must be greater than zero")
     if trend_up and 40 <= r["rsi14"] <= 68 and rv >= 1.0:
         stop = float(r["close"] - t["atr_stop_multiple"] * r["atr14"])
-        target = float(r["close"] + 1.5 * (r["close"] - stop))
+        target = float(r["close"] + min_risk_reward * (r["close"] - stop))
         out.append(_alert("Bot E — Swing trade", symbol, tf, r, "configuração potencial de alta",
                           f"Tendência SMA20>SMA50, RSI={r['rsi14']:.1f}; referência técnica, não recomendação. Invalidação indicativa: {stop:.8g}; objetivo ilustrativo: {target:.8g}."))
     elif trend_down and 32 <= r["rsi14"] <= 60 and rv >= 1.0:
         stop = float(r["close"] + t["atr_stop_multiple"] * r["atr14"])
-        target = float(r["close"] - 1.5 * (stop - r["close"]))
+        target = float(r["close"] - min_risk_reward * (stop - r["close"]))
         out.append(_alert("Bot E — Swing trade", symbol, tf, r, "configuração potencial de baixa",
                           f"Tendência SMA20<SMA50, RSI={r['rsi14']:.1f}; referência técnica, não recomendação. Invalidação indicativa: {stop:.8g}; objetivo ilustrativo: {target:.8g}."))
     return out
