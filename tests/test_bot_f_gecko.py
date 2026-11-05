@@ -174,6 +174,50 @@ class BotFGeckoTerminalTests(unittest.TestCase):
         self.assertEqual(result["field_quality"]["pool_address"]["coverage_pct"], 100.0)
         self.assertFalse(result["spread_data_available"])
 
+    def test_avalanche_validator_fails_when_page_limit_is_reached(self):
+        now = datetime.now(timezone.utc)
+        pools = []
+        for index in range(1, 4):
+            pools.append({
+                "pool_id": f"avax_pool_{index}",
+                "pool_address": "0x" + str(index) * 40,
+                "created_at": (now - timedelta(minutes=index)).isoformat(),
+                "liquidity_usd": "25000",
+                "volume_24h_usd": "12000",
+                "txns_24h": {"buys": 40, "sells": 35},
+                "base": {"address": "0x" + "2" * 40},
+                "quote": {"address": "0x" + "3" * 40},
+                "base_price_usd": "0.5",
+                "quote_price_usd": "1.0",
+            })
+        with patch.object(
+            avalanche_validation, "fetch_new_pools",
+            side_effect=[[pools[0]], [pools[1]], [pools[2]]],
+        ), patch.object(avalanche_validation.time, "sleep"):
+            result = avalanche_validation.validate()
+
+        self.assertEqual(result["pages_completed"], avalanche_validation.MAX_PAGES)
+        self.assertEqual(result["pagination_status"], "page_limit_reached")
+        self.assertFalse(result["pagination_complete"])
+        self.assertEqual(result["status"], "pagination_incomplete")
+
+    def test_avalanche_validator_main_returns_failure_for_incomplete_pagination(self):
+        incomplete = {
+            "status": "success",
+            "pagination_complete": False,
+            "resolved_gecko_slug": "avax",
+            "pages_completed": 3,
+            "pools_received": 3,
+            "unique_pool_count": 3,
+            "duplicate_pool_count": 0,
+            "pagination_status": "page_limit_reached",
+            "quality_status": "measured",
+        }
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(avalanche_validation, "validate", return_value=incomplete), \
+             patch.object(avalanche_validation, "OUTPUT_PATH", Path(directory) / "result.json"):
+            self.assertEqual(avalanche_validation.main(), 1)
+
     def test_avalanche_validator_records_resource_id_format_and_missing_reason(self):
         bad = {"pool_id": "avax_0x" + "a" * 64, "pool_address": None,
                "pool_address_source": "missing_or_invalid"}

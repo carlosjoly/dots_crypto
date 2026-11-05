@@ -1,0 +1,31 @@
+name: Bot F Avalanche Pagination Regression
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "app/validate_bot_f_avalanche.py"
+      - "tests/test_bot_f_gecko.py"
+      - "requirements.txt"
+      - ".github/workflows/bot-f-avalanche-regression.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  bot-f-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run Bot F unit and regression tests
+        run: python -m unittest discover -s tests -p 'test_bot_f_gecko.py' -v
