@@ -270,6 +270,9 @@ def validate():
     elif not all_pools:
         # A successful HTTP cycle with no pool data is not sufficient validation evidence.
         result["status"] = "no_data"
+    elif not result["pagination_complete"]:
+        # Reaching MAX_PAGES without an empty page is not proof of full pagination.
+        result["status"] = "pagination_incomplete"
     else:
         result["status"] = "success"
     result["spread_data_available"] = False
@@ -287,7 +290,7 @@ def main():
         result["unique_pool_count"], result["duplicate_pool_count"],
         result["pagination_status"], result["quality_status"],
     )
-    return 0 if result["status"] == "success" and result["resolved_gecko_slug"] == "avax" else 1
+    return 0 if result["status"] == "success" and result["pagination_complete"] and result["resolved_gecko_slug"] == "avax" else 1
 
 
 if __name__ == "__main__":
