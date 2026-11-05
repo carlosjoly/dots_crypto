@@ -206,6 +206,12 @@ class BotFGeckoTerminalTests(unittest.TestCase):
             "status": "success",
             "pagination_complete": False,
             "resolved_gecko_slug": "avax",
+            "pages_completed": 3,
+            "pools_received": 3,
+            "unique_pool_count": 3,
+            "duplicate_pool_count": 0,
+            "pagination_status": "page_limit_reached",
+            "quality_status": "measured",
         }
         with tempfile.TemporaryDirectory() as directory, \
              patch.object(avalanche_validation, "validate", return_value=incomplete), \
