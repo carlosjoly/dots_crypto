@@ -23,6 +23,8 @@ def config():
         "relative_volume": 1.0, "breakout_lookback": 20,
         "rsi_oversold": 30, "rsi_overbought": 70,
         "atr_stop_multiple": 1.5, "min_risk_reward": 1.5,
+        "swing_pullback_rsi_min": 45, "swing_pullback_rsi_max": 65,
+        "swing_pullback_relative_volume": 1.2,
     }}
 
 
@@ -39,16 +41,37 @@ class EdgeTriggeredSignalTests(unittest.TestCase):
         second = run_market_agents_enriched("BTCUSDT", "15m", frame, config())
         self.assertFalse(any(x["agent"] == "Bot D — Rompimentos" for x in second))
 
-    def test_swing_setup_is_emitted_once_per_setup_transition(self):
+    def test_15m_swing_requires_pullback_and_confirmed_reclaim(self):
         frame = make_frame()
-        frame.loc[58, ["close", "sma20", "sma50", "rsi14", "rel_volume"]] = [110, 105, 100, 50, 1.2]
-        frame.loc[59, ["close", "sma20", "sma50", "rsi14", "rel_volume"]] = [111, 105, 100, 51, 1.2]
-        repeated = run_market_agents_enriched("BTCUSDT", "15m", frame, config())
-        self.assertFalse(any(x["agent"] == "Bot E — Swing trade" for x in repeated))
+        # Strong trend and RSI alone are insufficient without an SMA20 pullback.
+        frame.loc[58, ["low", "close", "high", "sma20", "sma50", "rsi14", "rel_volume"]] = [
+            106, 108, 109, 105, 100, 50, 1.3
+        ]
+        frame.loc[59, ["low", "close", "high", "sma20", "sma50", "rsi14", "rel_volume"]] = [
+            107, 112, 113, 106, 100, 52, 1.3
+        ]
+        no_pullback = run_market_agents_enriched("BTCUSDT", "15m", frame, config())
+        self.assertFalse(any(x["agent"] == "Bot E — Swing trade" for x in no_pullback))
 
-        frame.loc[58, ["close", "sma20", "sma50", "rsi14", "rel_volume"]] = [100, 105, 102, 35, 0.5]
+        # A wick tests SMA20 while the prior trend remains above SMA50;
+        # the current candle reclaims SMA20 and closes above the prior high.
+        frame.loc[58, ["low", "close", "high", "sma20", "sma50", "rsi14", "rel_volume"]] = [
+            104, 108, 110, 105, 100, 50, 1.0
+        ]
+        frame.loc[59, ["low", "close", "high", "sma20", "sma50", "rsi14", "rel_volume"]] = [
+            107, 112, 113, 106, 100, 52, 1.3
+        ]
         entered = run_market_agents_enriched("BTCUSDT", "15m", frame, config())
         self.assertEqual(sum(x["agent"] == "Bot E — Swing trade" for x in entered), 1)
+
+        # Once price has reclaimed SMA20, the setup is not emitted again
+        # unless a fresh pullback and reclaim happen.
+        frame.loc[60] = frame.loc[59]
+        frame.loc[60, ["low", "close", "high", "sma20", "sma50", "rsi14", "rel_volume"]] = [
+            111, 114, 115, 107, 100, 53, 1.3
+        ]
+        repeated = run_market_agents_enriched("BTCUSDT", "15m", frame.iloc[1:], config())
+        self.assertFalse(any(x["agent"] == "Bot E — Swing trade" for x in repeated))
 
 
 if __name__ == "__main__":

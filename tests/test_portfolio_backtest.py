@@ -4,7 +4,8 @@ import pandas as pd
 
 from app.historical_backtest import signal_direction
 from app.indicators import rsi
-from app.portfolio_backtest import chronological_bounds, simulate_portfolio
+from app.portfolio_backtest import (chronological_bounds, simulate_portfolio,
+                                    filter_events_by_market_mode, failed_spot_long_test_rows)
 
 
 class SafeSignalDirectionTests(unittest.TestCase):
@@ -28,6 +29,38 @@ class SafeSignalDirectionTests(unittest.TestCase):
             with self.subTest(alert=alert):
                 with self.assertRaises(ValueError):
                     signal_direction(alert)
+
+
+class MarketModeSeparationTests(unittest.TestCase):
+    def test_spot_long_and_short_research_events_are_disjoint(self):
+        events = [
+            {"symbol": "BTCUSDT", "direction": 1, "signal": "bullish"},
+            {"symbol": "ETHUSDT", "direction": -1, "signal": "bearish"},
+        ]
+        longs = filter_events_by_market_mode(events, "spot_long")
+        shorts = filter_events_by_market_mode(events, "short_research")
+        self.assertEqual([event["direction"] for event in longs], [1])
+        self.assertEqual([event["direction"] for event in shorts], [-1])
+        self.assertFalse(set(map(id, longs)) & set(map(id, shorts)))
+
+    def test_unknown_market_mode_is_rejected(self):
+        with self.assertRaises(ValueError):
+            filter_events_by_market_mode([], "spot_margin")
+
+    def test_short_research_and_bot_b_do_not_enter_spot_long_gate(self):
+        rows = [
+            {"split": "test", "market_mode": "spot_long", "agent": "Bot A — Altas expressivas",
+             "timeframe": "15m", "trades": 3, "total_return_pct": 1.0},
+            {"split": "test", "market_mode": "short_research", "agent": "Bot A — Altas expressivas",
+             "timeframe": "15m", "trades": 3, "total_return_pct": -1.0},
+            {"split": "test", "market_mode": "spot_long", "agent": "Bot B — Quedas expressivas",
+             "timeframe": "15m", "trades": 0, "total_return_pct": 0.0},
+            {"split": "test", "market_mode": "spot_long", "agent": "Bot C — Reversões",
+             "timeframe": "15m", "trades": 0, "total_return_pct": 0.0},
+        ]
+        failed = failed_spot_long_test_rows(rows)
+        self.assertEqual(len(failed), 1)
+        self.assertEqual(failed[0]["agent"], "Bot C — Reversões")
 
 
 class RsiEdgeCaseTests(unittest.TestCase):

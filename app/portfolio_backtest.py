@@ -273,6 +273,37 @@ def _make_events(symbol, timeframe, raw, cfg):
     return data, events
 
 
+SPOT_LONG_GATE_AGENTS = {
+    "Bot A — Altas expressivas",
+    "Bot C — Reversões",
+    "Bot D — Rompimentos",
+    "Bot E — Swing trade",
+}
+
+
+def filter_events_by_market_mode(events, market_mode):
+    """Keep executable Spot-long events separate from hypothetical short research."""
+    directions = {"spot_long": 1, "short_research": -1}
+    if market_mode not in directions:
+        raise ValueError(f"Unsupported market mode: {market_mode}")
+    direction = directions[market_mode]
+    return [event for event in events if int(event["direction"]) == direction]
+
+
+def failed_spot_long_test_rows(summaries):
+    """The positive out-of-sample gate applies only to Spot-long candidates."""
+    rows = [
+        row for row in summaries
+        if row["split"] == "test"
+        and row["market_mode"] == "spot_long"
+        and row["agent"] in SPOT_LONG_GATE_AGENTS
+    ]
+    return [
+        row for row in rows
+        if int(row["trades"]) == 0 or float(row["total_return_pct"]) <= 0
+    ]
+
+
 def run(days=180, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
         initial_cash=10000.0, risk_fraction=0.01, max_exposure_fraction=0.80,
         max_positions=5, stop_atr_multiple=1.5, reward_risk=1.5,
@@ -282,6 +313,8 @@ def run(days=180, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
     historical_dir, output_dir = root / "data" / "historical", root / "data" / "backtest"
     output_dir.mkdir(parents=True, exist_ok=True)
     summaries, all_trades, all_curves, benchmarks, manifest = [], [], [], [], []
+    market_modes = ("spot_long", "short_research")
+
     for timeframe in cfg["exchange"]["timeframes"]:
         frames, events_by_agent = {}, {agent: [] for agent in AGENTS}
         for symbol in cfg["exchange"]["symbols"]:
@@ -303,59 +336,115 @@ def run(days=180, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
             manifest.append({"symbol": symbol, "timeframe": timeframe, "status": "valid", "candles": len(data)})
         if not frames:
             continue
-        bounds = {s: chronological_bounds(len(f)) for s, f in frames.items()}
-        for agent in AGENTS:
-            for split in SPLITS:
-                starts = {s: bounds[s][split][0] for s in frames}
-                ends = {s: bounds[s][split][1] for s in frames}
-                selected = [e for e in events_by_agent[agent]
-                            if e["signal_index"] >= starts[e["symbol"]] - 1
-                            and e["entry_index"] < ends[e["symbol"]]]
-                sim = simulate_portfolio(
-                    frames, selected, starts, ends, initial_cash, fee_per_side_pct,
-                    slippage_per_side_pct, risk_fraction, max_exposure_fraction,
-                    max_positions, stop_atr_multiple, reward_risk, timeframe,
-                )
-                bh = buy_and_hold_benchmark(frames, starts, ends, initial_cash,
-                                             fee_per_side_pct, slippage_per_side_pct)
-                row = dict(sim["metrics"])
-                row.update({"agent": agent, "timeframe": timeframe, "split": split,
-                            "buy_hold_return_pct": bh["total_return_pct"],
-                            "excess_vs_buy_hold_pct": round(row["total_return_pct"] - bh["total_return_pct"], 5),
-                            "beats_buy_hold": row["total_return_pct"] > bh["total_return_pct"],
-                            "buy_hold_final_equity": bh["final_equity"]})
-                summaries.append(row)
-                all_trades.extend({"agent": agent, "timeframe": timeframe, "split": split, **t} for t in sim["trades"])
-                all_curves.extend({"agent": agent, "timeframe": timeframe, "split": split, **p} for p in sim["equity_curve"])
-                benchmarks.extend({"agent": agent, "timeframe": timeframe, "split": split, "symbol": s, **v}
-                                  for s, v in bh["by_symbol"].items())
 
-    pd.DataFrame(summaries).to_csv(output_dir / "portfolio_summary.csv", index=False)
+        bounds = {symbol: chronological_bounds(len(frame)) for symbol, frame in frames.items()}
+        for market_mode in market_modes:
+            for agent in AGENTS:
+                mode_events = filter_events_by_market_mode(events_by_agent[agent], market_mode)
+                for split in SPLITS:
+                    starts = {symbol: bounds[symbol][split][0] for symbol in frames}
+                    ends = {symbol: bounds[symbol][split][1] for symbol in frames}
+                    selected = [
+                        event for event in mode_events
+                        if event["signal_index"] >= starts[event["symbol"]] - 1
+                        and event["entry_index"] < ends[event["symbol"]]
+                    ]
+                    sim = simulate_portfolio(
+                        frames, selected, starts, ends, initial_cash, fee_per_side_pct,
+                        slippage_per_side_pct, risk_fraction, max_exposure_fraction,
+                        max_positions, stop_atr_multiple, reward_risk, timeframe,
+                    )
+                    bh = buy_and_hold_benchmark(
+                        frames, starts, ends, initial_cash,
+                        fee_per_side_pct, slippage_per_side_pct,
+                    )
+                    row = dict(sim["metrics"])
+                    row.update({
+                        "market_mode": market_mode, "agent": agent, "timeframe": timeframe,
+                        "split": split, "buy_hold_return_pct": bh["total_return_pct"],
+                        "excess_vs_buy_hold_pct": round(
+                            row["total_return_pct"] - bh["total_return_pct"], 5
+                        ),
+                        "beats_buy_hold": row["total_return_pct"] > bh["total_return_pct"],
+                        "buy_hold_final_equity": bh["final_equity"],
+                    })
+                    summaries.append(row)
+                    all_trades.extend({
+                        "market_mode": market_mode, "agent": agent,
+                        "timeframe": timeframe, "split": split, **trade,
+                    } for trade in sim["trades"])
+                    all_curves.extend({
+                        "market_mode": market_mode, "agent": agent,
+                        "timeframe": timeframe, "split": split, **point,
+                    } for point in sim["equity_curve"])
+                    benchmarks.extend({
+                        "market_mode": market_mode, "agent": agent,
+                        "timeframe": timeframe, "split": split,
+                        "symbol": symbol, **values,
+                    } for symbol, values in bh["by_symbol"].items())
+
+    summary_frame = pd.DataFrame(summaries)
+    summary_frame.to_csv(output_dir / "portfolio_summary.csv", index=False)
+    summary_frame[summary_frame["market_mode"] == "spot_long"].to_csv(
+        output_dir / "portfolio_summary_spot_long.csv", index=False
+    )
+    summary_frame[summary_frame["market_mode"] == "short_research"].to_csv(
+        output_dir / "portfolio_summary_short_research.csv", index=False
+    )
     pd.DataFrame(all_trades).to_csv(output_dir / "portfolio_trades.csv", index=False)
     pd.DataFrame(all_curves).to_csv(output_dir / "portfolio_equity_curves.csv", index=False)
     pd.DataFrame(benchmarks).to_csv(output_dir / "buy_and_hold_by_symbol.csv", index=False)
-    test_rows = [r for r in summaries if r["split"] == "test"]
-    failed = [r for r in test_rows if r["trades"] == 0 or r["total_return_pct"] <= 0]
+
+    test_rows = [
+        row for row in summaries
+        if row["split"] == "test" and row["market_mode"] == "spot_long"
+        and row["agent"] in SPOT_LONG_GATE_AGENTS
+    ]
+    failed = failed_spot_long_test_rows(summaries)
+    gate_passed = bool(test_rows) and not failed
     report = {
-        "method": "multi_asset_portfolio_next_open_atr_stop_target",
+        "method": "separate_spot_long_and_synthetic_short_portfolios",
         "days_requested": days,
-        "shorts": "Synthetic research shorts are hypothetical and not executable on Binance Spot.",
-        "execution": {"entry": "next candle open after closed signal", "intrabar": "stop first if stop and target both hit",
-                      "fees_and_slippage": "charged on entry and exit", "positions": "simultaneous across symbols",
-                      "split_liquidation": "open positions closed at final candle of each split"},
-        "risk": {"initial_cash": initial_cash, "risk_per_trade_pct": risk_fraction * 100,
-                 "max_total_exposure_pct": max_exposure_fraction * 100, "max_positions": max_positions,
-                 "stop_atr_multiple": stop_atr_multiple, "reward_risk": reward_risk},
+        "market_modes": {
+            "spot_long": "Only bullish signals; the executable research universe is Binance Spot long-only.",
+            "short_research": "Only bearish signals; hypothetical inverse exposure, not executable on Binance Spot and excluded from the profitability gate.",
+        },
+        "execution": {
+            "entry": "next candle open after closed signal",
+            "intrabar": "stop first if stop and target both hit",
+            "fees_and_slippage": "charged on entry and exit",
+            "positions": "simultaneous across symbols within each agent and market mode",
+            "split_liquidation": "open positions closed at final candle of each split",
+        },
+        "risk": {
+            "initial_cash": initial_cash, "risk_per_trade_pct": risk_fraction * 100,
+            "max_total_exposure_pct": max_exposure_fraction * 100,
+            "max_positions": max_positions, "stop_atr_multiple": stop_atr_multiple,
+            "reward_risk": reward_risk,
+        },
         "splits": {"train": "first 60%", "validation": "next 20%", "test": "last 20%"},
-        "benchmark": "equal-weight Buy & Hold on identical symbols and split, net of fee and slippage",
-        "test_gate": {"required": require_positive_test, "passed": bool(test_rows) and not failed,
-                      "failed": [{"agent": r["agent"], "timeframe": r["timeframe"],
-                                  "trades": r["trades"], "net_return_pct": r["total_return_pct"]} for r in failed]},
-        "dataset_manifest": manifest, "summary": summaries,
+        "benchmark": "equal-weight Spot Buy & Hold on identical symbols and split, net of fee and slippage",
+        "test_gate": {
+            "required": require_positive_test,
+            "scope": "spot_long only; Bots A, C, D and E. Bot B remains a downside/risk alert, not a Spot-long candidate.",
+            "passed": gate_passed,
+            "evaluated_combinations": len(test_rows),
+            "failed": [
+                {"agent": row["agent"], "timeframe": row["timeframe"],
+                 "trades": row["trades"], "net_return_pct": row["total_return_pct"]}
+                for row in failed
+            ],
+        },
+        "dataset_manifest": manifest,
+        "summary": summaries,
     }
     (output_dir / "portfolio_report.json").write_text(
-        json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
-    log.info("Portfolio backtest: %d combinações; %d testes reprovados.", len(summaries), len(failed))
+        json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8"
+    )
+    log.info(
+        "Portfolio backtest: %d combinações; %d Spot-long no teste; %d reprovadas no gate.",
+        len(summaries), len(test_rows), len(failed),
+    )
     return 1 if require_positive_test and (not test_rows or failed) else 0
 
 

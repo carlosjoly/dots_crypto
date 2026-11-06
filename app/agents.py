@@ -65,26 +65,51 @@ def run_market_agents_enriched(symbol, tf, d, cfg):
                           f"Fecho cruzou abaixo da mínima das {lookback} velas anteriores com volume relativo {rv:.2f}x; confirmar risco de falso rompimento."))
     trend_up = r["close"] > r["sma20"] > r["sma50"]
     trend_down = r["close"] < r["sma20"] < r["sma50"]
-    previous_trend_up = prev["close"] > prev["sma20"] > prev["sma50"]
-    previous_trend_down = prev["close"] < prev["sma20"] < prev["sma50"]
+    previous_trend_up = prev["close"] > prev["sma50"] and prev["sma20"] > prev["sma50"]
+    previous_trend_down = prev["close"] < prev["sma50"] and prev["sma20"] < prev["sma50"]
     min_risk_reward = float(t.get("min_risk_reward", 1.5))
     if min_risk_reward <= 0:
         raise ValueError("thresholds.min_risk_reward must be greater than zero")
-    swing_long = trend_up and 40 <= r["rsi14"] <= 68 and rv >= 1.0
-    previous_swing_long = previous_trend_up and 40 <= prev["rsi14"] <= 68 and prev["rel_volume"] >= 1.0
-    swing_short = trend_down and 32 <= r["rsi14"] <= 60 and rv >= 1.0
-    previous_swing_short = previous_trend_down and 32 <= prev["rsi14"] <= 60 and prev["rel_volume"] >= 1.0
-    # Swing setup is an entry event: emit once when the complete setup becomes true.
-    if swing_long and not previous_swing_long:
-        stop = float(r["close"] - t["atr_stop_multiple"] * r["atr14"])
-        target = float(r["close"] + min_risk_reward * (r["close"] - stop))
-        out.append(_alert("Bot E — Swing trade", symbol, tf, r, "configuração potencial de alta",
-                          f"Tendência SMA20>SMA50, RSI={r['rsi14']:.1f}; referência técnica, não recomendação. Invalidação indicativa: {stop:.8g}; objetivo ilustrativo: {target:.8g}."))
-    elif swing_short and not previous_swing_short:
-        stop = float(r["close"] + t["atr_stop_multiple"] * r["atr14"])
-        target = float(r["close"] - min_risk_reward * (stop - r["close"]))
-        out.append(_alert("Bot E — Swing trade", symbol, tf, r, "configuração potencial de baixa",
-                          f"Tendência SMA20<SMA50, RSI={r['rsi14']:.1f}; referência técnica, não recomendação. Invalidação indicativa: {stop:.8g}; objetivo ilustrativo: {target:.8g}."))
+
+    if tf == "15m":
+        # A 15m swing entry now requires an established uptrend, an actual
+        # pullback to SMA20, and a bullish reclaim that closes above the
+        # previous candle high. This is deliberately a one-candle trigger.
+        pullback_long = (
+            previous_trend_up
+            and float(prev["low"]) <= float(prev["sma20"])
+            and float(prev["close"]) > float(prev["sma50"])
+        )
+        confirmed_reclaim_long = (
+            trend_up
+            and float(r["close"]) > float(prev["high"])
+            and float(r["close"]) > float(r["sma20"])
+            and float(r["rsi14"]) >= float(t.get("swing_pullback_rsi_min", 45))
+            and float(r["rsi14"]) <= float(t.get("swing_pullback_rsi_max", 65))
+            and float(rv) >= float(t.get("swing_pullback_relative_volume", 1.2))
+        )
+        if pullback_long and confirmed_reclaim_long:
+            stop = float(r["close"] - t["atr_stop_multiple"] * r["atr14"])
+            target = float(r["close"] + min_risk_reward * (r["close"] - stop))
+            out.append(_alert("Bot E — Swing trade", symbol, tf, r, "configuração potencial de alta",
+                              f"Recuo à SMA20 seguido de recuperação acima da máxima anterior; RSI={r['rsi14']:.1f}. Invalidação indicativa: {stop:.8g}; objetivo ilustrativo: {target:.8g}."))
+    else:
+        # Preserve the previous edge-triggered swing rules on 1h/4h so the
+        # experiment isolates the requested 15m change.
+        swing_long = trend_up and 40 <= r["rsi14"] <= 68 and rv >= 1.0
+        previous_swing_long = previous_trend_up and 40 <= prev["rsi14"] <= 68 and prev["rel_volume"] >= 1.0
+        swing_short = trend_down and 32 <= r["rsi14"] <= 60 and rv >= 1.0
+        previous_swing_short = previous_trend_down and 32 <= prev["rsi14"] <= 60 and prev["rel_volume"] >= 1.0
+        if swing_long and not previous_swing_long:
+            stop = float(r["close"] - t["atr_stop_multiple"] * r["atr14"])
+            target = float(r["close"] + min_risk_reward * (r["close"] - stop))
+            out.append(_alert("Bot E — Swing trade", symbol, tf, r, "configuração potencial de alta",
+                              f"Tendência SMA20>SMA50, RSI={r['rsi14']:.1f}; referência técnica, não recomendação. Invalidação indicativa: {stop:.8g}; objetivo ilustrativo: {target:.8g}."))
+        elif swing_short and not previous_swing_short:
+            stop = float(r["close"] + t["atr_stop_multiple"] * r["atr14"])
+            target = float(r["close"] - min_risk_reward * (stop - r["close"]))
+            out.append(_alert("Bot E — Swing trade", symbol, tf, r, "configuração potencial de baixa",
+                              f"Tendência SMA20<SMA50, RSI={r['rsi14']:.1f}; referência técnica, não recomendação. Invalidação indicativa: {stop:.8g}; objetivo ilustrativo: {target:.8g}."))
     return out
 
 def disabled_agent_status(cfg=None):
