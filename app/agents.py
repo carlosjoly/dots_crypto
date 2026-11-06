@@ -89,11 +89,29 @@ def run_market_agents_enriched(symbol, tf, d, cfg):
             and float(r["rsi14"]) <= float(t.get("swing_pullback_rsi_max", 65))
             and float(rv) >= float(t.get("swing_pullback_relative_volume", 1.2))
         )
+        pullback_short = (
+            float(prev["close"]) < float(prev["sma50"])
+            and float(prev["sma20"]) < float(prev["sma50"])
+            and float(prev["high"]) >= float(prev["sma20"])
+        )
+        confirmed_breakdown_short = (
+            trend_down
+            and float(r["close"]) < float(prev["low"])
+            and float(r["close"]) < float(r["sma20"])
+            and float(r["rsi14"]) >= float(t.get("swing_pullback_short_rsi_min", 35))
+            and float(r["rsi14"]) <= float(t.get("swing_pullback_short_rsi_max", 55))
+            and float(rv) >= float(t.get("swing_pullback_relative_volume", 1.2))
+        )
         if pullback_long and confirmed_reclaim_long:
             stop = float(r["close"] - t["atr_stop_multiple"] * r["atr14"])
             target = float(r["close"] + min_risk_reward * (r["close"] - stop))
             out.append(_alert("Bot E — Swing trade", symbol, tf, r, "configuração potencial de alta",
                               f"Recuo à SMA20 seguido de recuperação acima da máxima anterior; RSI={r['rsi14']:.1f}. Invalidação indicativa: {stop:.8g}; objetivo ilustrativo: {target:.8g}."))
+        elif pullback_short and confirmed_breakdown_short:
+            stop = float(r["close"] + t["atr_stop_multiple"] * r["atr14"])
+            target = float(r["close"] - min_risk_reward * (stop - r["close"]))
+            out.append(_alert("Bot E — Swing trade", symbol, tf, r, "configuração potencial de baixa",
+                              f"Reteste à SMA20 seguido de continuação abaixo da mínima anterior; RSI={r['rsi14']:.1f}. Invalidação indicativa: {stop:.8g}; objetivo ilustrativo: {target:.8g}."))
     else:
         # Preserve the previous edge-triggered swing rules on 1h/4h so the
         # experiment isolates the requested 15m change.
