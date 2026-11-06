@@ -29,7 +29,7 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Restore alert cooldown state
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: data/alert_cooldown.json
           key: alert-cooldown-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
@@ -67,6 +67,12 @@ jobs:
           GOPLUS_APP_SECRET: ${{ secrets.GOPLUS_APP_SECRET }}
           LUNARCRUSH_API_KEY: ${{ secrets.LUNARCRUSH_API_KEY }}
         run: python -m app.main
+      - name: Save alert cooldown state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/alert_cooldown.json
+          key: alert-cooldown-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
       - name: Upload logs and alerts
         if: always()
         uses: actions/upload-artifact@v4
