@@ -290,6 +290,25 @@ def filter_events_by_market_mode(events, market_mode):
     return [event for event in events if int(event["direction"]) == direction]
 
 
+def benchmark_for_market_mode(market_mode, frames, starts, ends, initial_cash,
+                              fee_per_side_pct, slippage_per_side_pct):
+    """Use a comparable benchmark for each market mode."""
+    if market_mode == "spot_long":
+        return (
+            buy_and_hold_benchmark(
+                frames, starts, ends, initial_cash,
+                fee_per_side_pct, slippage_per_side_pct,
+            ),
+            "equal_weight_buy_and_hold",
+        )
+    if market_mode == "short_research":
+        return (
+            {"final_equity": initial_cash, "total_return_pct": 0.0, "by_symbol": {}},
+            "cash_zero_return",
+        )
+    raise ValueError(f"Unsupported market mode: {market_mode}")
+
+
 def failed_spot_long_test_rows(summaries):
     """The positive out-of-sample gate applies only to Spot-long candidates."""
     rows = [
@@ -354,18 +373,11 @@ def run(days=180, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
                         slippage_per_side_pct, risk_fraction, max_exposure_fraction,
                         max_positions, stop_atr_multiple, reward_risk, timeframe,
                     )
-                    if market_mode == "spot_long":
-                        bh = buy_and_hold_benchmark(
-                            frames, starts, ends, initial_cash,
-                            fee_per_side_pct, slippage_per_side_pct,
-                        )
-                        benchmark_name = "equal_weight_buy_and_hold"
-                        buy_hold_return = bh["total_return_pct"]
-                    else:
-                        # A long-only Buy & Hold return is not meaningful for hypothetical shorts.
-                        bh = {"final_equity": initial_cash, "total_return_pct": 0.0, "by_symbol": {}}
-                        benchmark_name = "cash_zero_return"
-                        buy_hold_return = None
+                    bh, benchmark_name = benchmark_for_market_mode(
+                        market_mode, frames, starts, ends, initial_cash,
+                        fee_per_side_pct, slippage_per_side_pct,
+                    )
+                    buy_hold_return = bh["total_return_pct"] if market_mode == "spot_long" else None
                     row = dict(sim["metrics"])
                     row.update({
                         "market_mode": market_mode, "agent": agent, "timeframe": timeframe,
