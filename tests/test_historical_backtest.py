@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime, timezone
 
-from app.historical_backtest import net_event_return, signal_direction, _split_for_index
+from app.historical_backtest import net_event_return, signal_direction, _split_for_index, summarize_events
 
 
 class HistoricalEventStudyTests(unittest.TestCase):
@@ -20,6 +20,20 @@ class HistoricalEventStudyTests(unittest.TestCase):
         self.assertEqual(_split_for_index(10, 100)[0], "train")
         self.assertEqual(_split_for_index(65, 100)[0], "validation")
         self.assertEqual(_split_for_index(85, 100)[0], "test")
+
+
+    def test_event_summary_keeps_spot_long_and_short_research_separate(self):
+        common = {
+            "symbol": "BTCUSDT", "timeframe": "15m", "agent": "Bot A",
+            "horizon_bars": 4, "split": "test",
+        }
+        rows = [
+            {**common, "direction": "bullish", "net_return_pct": 1.0},
+            {**common, "direction": "bearish", "net_return_pct": -1.0},
+        ]
+        summary = summarize_events(rows)
+        self.assertEqual({row["market_mode"] for row in summary}, {"spot_long", "short_research"})
+        self.assertEqual(len(summary), 2)
 
     def test_invalid_prices_are_rejected(self):
         with self.assertRaises(ValueError):
