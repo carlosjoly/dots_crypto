@@ -74,5 +74,21 @@ class EdgeTriggeredSignalTests(unittest.TestCase):
         self.assertFalse(any(x["agent"] == "Bot E — Swing trade" for x in repeated))
 
 
+    def test_1h_and_4h_keep_the_previous_swing_transition_rule(self):
+        for timeframe in ("1h", "4h"):
+            frame = make_frame()
+            frame.loc[58, ["low", "close", "high", "sma20", "sma50", "rsi14", "rel_volume"]] = [
+                103, 104, 106, 105, 100, 50, 1.2
+            ]
+            frame.loc[59, ["low", "close", "high", "sma20", "sma50", "rsi14", "rel_volume"]] = [
+                108, 110, 111, 105, 100, 51, 1.2
+            ]
+            alerts = run_market_agents_enriched("BTCUSDT", timeframe, frame, config())
+            with self.subTest(timeframe=timeframe):
+                self.assertEqual(
+                    sum(x["agent"] == "Bot E — Swing trade" for x in alerts), 1
+                )
+
+
 if __name__ == "__main__":
     unittest.main()
