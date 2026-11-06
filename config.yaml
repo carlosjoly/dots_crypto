@@ -19,6 +19,8 @@ thresholds:
   min_risk_reward: 1.5
   swing_pullback_rsi_min: 45
   swing_pullback_rsi_max: 65
+  swing_pullback_short_rsi_min: 35
+  swing_pullback_short_rsi_max: 55
   swing_pullback_relative_volume: 1.2
 
 alerts:
