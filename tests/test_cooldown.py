@@ -57,13 +57,13 @@ class CooldownStoreTests(unittest.TestCase):
 
 class BacktestCooldownTests(unittest.TestCase):
     def test_backtest_suppresses_repeated_signal_inside_cooldown(self):
-        timestamps = pd.date_range("2026-01-01", periods=57, freq="15min", tz="UTC")
+        timestamps = pd.date_range("2026-01-01", periods=60, freq="15min", tz="UTC")
         frame = pd.DataFrame({
             "open_time": timestamps,
-            "quote_volume": [10.0] * 57,
-            "open": [100.0] * 57, "high": [101.0] * 57,
-            "low": [99.0] * 57, "close": [100.0] * 57,
-            "volume": [1.0] * 57, "atr14": [1.0] * 57,
+            "quote_volume": [10.0] * 60,
+            "open": [100.0] * 60, "high": [101.0] * 60,
+            "low": [99.0] * 60, "close": [100.0] * 57,
+            "volume": [1.0] * 60, "atr14": [1.0] * 57,
         })
         alert = {"agent": "Bot A", "signal": "movimento de alta"}
         cfg = {"exchange": {"min_quote_volume_24h_usdt": 0},
@@ -72,7 +72,7 @@ class BacktestCooldownTests(unittest.TestCase):
              patch("app.portfolio_backtest.run_market_agents_enriched", return_value=[alert]), \
              patch.dict(BARS_PER_24H, {"15m": 1}):
             _, events = _make_events("BTCUSDT", "15m", frame, cfg)
-        self.assertEqual(len(events["Bot A"]), 1)
+        self.assertEqual([event["signal_index"] for event in events["Bot A"]], [54, 58])
 
 
 if __name__ == "__main__":
