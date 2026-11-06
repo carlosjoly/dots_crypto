@@ -57,13 +57,13 @@ class CooldownStoreTests(unittest.TestCase):
 
 class BacktestCooldownTests(unittest.TestCase):
     def test_backtest_suppresses_repeated_signal_inside_cooldown(self):
-        timestamps = pd.date_range("2026-01-01", periods=56, freq="15min", tz="UTC")
+        timestamps = pd.date_range("2026-01-01", periods=57, freq="15min", tz="UTC")
         frame = pd.DataFrame({
             "open_time": timestamps,
-            "quote_volume": [10.0] * 56,
-            "open": [100.0] * 56, "high": [101.0] * 56,
-            "low": [99.0] * 56, "close": [100.0] * 56,
-            "volume": [1.0] * 56, "atr14": [1.0] * 56,
+            "quote_volume": [10.0] * 57,
+            "open": [100.0] * 57, "high": [101.0] * 57,
+            "low": [99.0] * 57, "close": [100.0] * 56,
+            "volume": [1.0] * 57, "atr14": [1.0] * 56,
         })
         alert = {"agent": "Bot A", "signal": "movimento de alta"}
         cfg = {"exchange": {"min_quote_volume_24h_usdt": 0},
