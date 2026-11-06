@@ -4,7 +4,8 @@ import pandas as pd
 
 from app.historical_backtest import signal_direction
 from app.indicators import rsi
-from app.portfolio_backtest import (chronological_bounds, simulate_portfolio,\n                                    filter_events_by_market_mode, failed_spot_long_test_rows)
+from app.portfolio_backtest import (chronological_bounds, simulate_portfolio,
+                                    filter_events_by_market_mode, failed_spot_long_test_rows)
 
 
 class SafeSignalDirectionTests(unittest.TestCase):
