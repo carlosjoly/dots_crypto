@@ -65,8 +65,8 @@ def run_market_agents_enriched(symbol, tf, d, cfg):
                           f"Fecho cruzou abaixo da mínima das {lookback} velas anteriores com volume relativo {rv:.2f}x; confirmar risco de falso rompimento."))
     trend_up = r["close"] > r["sma20"] > r["sma50"]
     trend_down = r["close"] < r["sma20"] < r["sma50"]
-    previous_trend_up = prev["close"] > prev["sma50"] and prev["sma20"] > prev["sma50"]
-    previous_trend_down = prev["close"] < prev["sma50"] and prev["sma20"] < prev["sma50"]
+    previous_trend_up = prev["close"] > prev["sma20"] > prev["sma50"]
+    previous_trend_down = prev["close"] < prev["sma20"] < prev["sma50"]
     min_risk_reward = float(t.get("min_risk_reward", 1.5))
     if min_risk_reward <= 0:
         raise ValueError("thresholds.min_risk_reward must be greater than zero")
@@ -76,7 +76,8 @@ def run_market_agents_enriched(symbol, tf, d, cfg):
         # pullback to SMA20, and a bullish reclaim that closes above the
         # previous candle high. This is deliberately a one-candle trigger.
         pullback_long = (
-            previous_trend_up
+            float(prev["close"]) > float(prev["sma50"])
+            and float(prev["sma20"]) > float(prev["sma50"])
             and float(prev["low"]) <= float(prev["sma20"])
             and float(prev["close"]) > float(prev["sma50"])
         )
