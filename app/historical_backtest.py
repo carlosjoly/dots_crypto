@@ -79,10 +79,22 @@ def download_historical_klines(base_url, symbol, interval, start_ms, end_ms, ses
 
 
 def signal_direction(alert):
-    signal = str(alert.get("signal", "")).lower()
-    if any(term in signal for term in ("baixa", "suporte", "perda de força", "movimento de baixa")):
-        return -1
-    return 1
+    """Return a direction only for explicitly recognized signal semantics."""
+    signal = str(alert.get("signal", "")).strip().casefold()
+    directions = {
+        "movimento de alta": 1,
+        "movimento de baixa": -1,
+        "possível estabilização após sobrevenda": 1,
+        "possível perda de força após sobrecompra": -1,
+        "possível rompimento de resistência": 1,
+        "possível rompimento de suporte": -1,
+        "configuração potencial de alta": 1,
+        "configuração potencial de baixa": -1,
+    }
+    try:
+        return directions[signal]
+    except KeyError as exc:
+        raise ValueError(f"Unrecognized signal direction; refusing to guess: {signal!r}") from exc
 
 
 def net_event_return(entry_price, exit_price, direction, fee_per_side_pct=0.10,

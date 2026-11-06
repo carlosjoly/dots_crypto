@@ -25,7 +25,7 @@ permissions:
 jobs:
   historical-event-study:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,6 +39,12 @@ jobs:
       - name: Download candles and run point-in-time event study
         run: >-
           python -m app.historical_backtest
+          --days "${{ inputs.days }}"
+          --fee-per-side-pct "${{ inputs.fee_per_side_pct }}"
+          --slippage-per-side-pct "${{ inputs.slippage_per_side_pct }}"
+      - name: Run portfolio backtest and enforce positive out-of-sample returns
+        run: >-
+          python -m app.portfolio_backtest
           --days "${{ inputs.days }}"
           --fee-per-side-pct "${{ inputs.fee_per_side_pct }}"
           --slippage-per-side-pct "${{ inputs.slippage_per_side_pct }}"

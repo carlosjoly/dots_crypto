@@ -144,3 +144,12 @@ O artefato contém:
 - `data/backtest/dataset_manifest.json`: cobertura e validade de cada conjunto.
 
 **Limitação metodológica:** isso é um estudo de eventos, não um simulador de carteira. Eventos podem se sobrepor; não representa alocação de capital, execução real, liquidez histórica, slippage observado, nem probabilidade calibrada. As premissas de custo são parâmetros do estudo, não taxas efetivamente cobradas da conta.
+
+
+## Backtest de carteira (novo)
+
+Além do estudo de eventos, o workflow histórico executa uma simulação de carteira por agente e timeframe, com posições simultâneas, dimensionamento por risco, stops/targets ATR, custos por lado, curva de capital e comparação com Buy & Hold. A execução é simulada; não envia ordens.
+
+O conjunto de teste é a última parcela cronológica (20%). O workflow reprova se qualquer combinação agente/timeframe não tiver operações ou terminar com retorno líquido não positivo no teste. Retorno positivo é um critério mínimo, não uma garantia de lucro.
+
+Consulte [docs/portfolio_backtest.md](docs/portfolio_backtest.md) para premissas, limitações e ficheiros de saída. As posições short são sintéticas para investigação e não são executáveis em Binance Spot.
