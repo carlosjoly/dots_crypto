@@ -354,19 +354,35 @@ def run(days=180, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
                         slippage_per_side_pct, risk_fraction, max_exposure_fraction,
                         max_positions, stop_atr_multiple, reward_risk, timeframe,
                     )
-                    bh = buy_and_hold_benchmark(
-                        frames, starts, ends, initial_cash,
-                        fee_per_side_pct, slippage_per_side_pct,
-                    )
+                    if market_mode == "spot_long":
+                        bh = buy_and_hold_benchmark(
+                            frames, starts, ends, initial_cash,
+                            fee_per_side_pct, slippage_per_side_pct,
+                        )
+                        benchmark_name = "equal_weight_buy_and_hold"
+                        buy_hold_return = bh["total_return_pct"]
+                    else:
+                        # A long-only Buy & Hold return is not meaningful for hypothetical shorts.
+                        bh = {"final_equity": initial_cash, "total_return_pct": 0.0, "by_symbol": {}}
+                        benchmark_name = "cash_zero_return"
+                        buy_hold_return = None
                     row = dict(sim["metrics"])
                     row.update({
                         "market_mode": market_mode, "agent": agent, "timeframe": timeframe,
-                        "split": split, "buy_hold_return_pct": bh["total_return_pct"],
-                        "excess_vs_buy_hold_pct": round(
-                            row["total_return_pct"] - bh["total_return_pct"], 5
+                        "split": split, "benchmark_name": benchmark_name,
+                        "benchmark_return_pct": bh["total_return_pct"],
+                        "excess_vs_benchmark_pct": round(row["total_return_pct"] - bh["total_return_pct"], 5),
+                        "beats_benchmark": row["total_return_pct"] > bh["total_return_pct"],
+                        "buy_hold_return_pct": buy_hold_return,
+                        "excess_vs_buy_hold_pct": (
+                            round(row["total_return_pct"] - buy_hold_return, 5)
+                            if buy_hold_return is not None else None
                         ),
-                        "beats_buy_hold": row["total_return_pct"] > bh["total_return_pct"],
-                        "buy_hold_final_equity": bh["final_equity"],
+                        "beats_buy_hold": (
+                            row["total_return_pct"] > buy_hold_return
+                            if buy_hold_return is not None else None
+                        ),
+                        "buy_hold_final_equity": bh["final_equity"] if market_mode == "spot_long" else None,
                     })
                     summaries.append(row)
                     all_trades.extend({
@@ -377,11 +393,12 @@ def run(days=180, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
                         "market_mode": market_mode, "agent": agent,
                         "timeframe": timeframe, "split": split, **point,
                     } for point in sim["equity_curve"])
-                    benchmarks.extend({
-                        "market_mode": market_mode, "agent": agent,
-                        "timeframe": timeframe, "split": split,
-                        "symbol": symbol, **values,
-                    } for symbol, values in bh["by_symbol"].items())
+                    if market_mode == "spot_long":
+                        benchmarks.extend({
+                            "market_mode": market_mode, "agent": agent,
+                            "timeframe": timeframe, "split": split,
+                            "symbol": symbol, **values,
+                        } for symbol, values in bh["by_symbol"].items())
 
     summary_frame = pd.DataFrame(summaries)
     summary_frame.to_csv(output_dir / "portfolio_summary.csv", index=False)
@@ -423,7 +440,10 @@ def run(days=180, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
             "reward_risk": reward_risk,
         },
         "splits": {"train": "first 60%", "validation": "next 20%", "test": "last 20%"},
-        "benchmark": "equal-weight Spot Buy & Hold on identical symbols and split, net of fee and slippage",
+        "benchmark": {
+            "spot_long": "equal-weight Spot Buy & Hold on identical symbols and split, net of fee and slippage",
+            "short_research": "0% cash reference; long-only Buy & Hold is not compared with hypothetical shorts",
+        },
         "test_gate": {
             "required": require_positive_test,
             "scope": "spot_long only; Bots A, C, D and E. Bot B remains a downside/risk alert, not a Spot-long candidate.",
