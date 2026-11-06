@@ -5,7 +5,7 @@ import pandas as pd
 from app.historical_backtest import signal_direction
 from app.indicators import rsi
 from app.portfolio_backtest import (chronological_bounds, simulate_portfolio,
-                                    filter_events_by_market_mode, failed_spot_long_test_rows)
+                                    filter_events_by_market_mode, failed_spot_long_test_rows, benchmark_for_market_mode)
 
 
 class SafeSignalDirectionTests(unittest.TestCase):
@@ -61,6 +61,30 @@ class MarketModeSeparationTests(unittest.TestCase):
         failed = failed_spot_long_test_rows(rows)
         self.assertEqual(len(failed), 1)
         self.assertEqual(failed[0]["agent"], "Bot C — Reversões")
+
+
+    def test_spot_long_uses_buy_hold_and_short_research_uses_cash(self):
+        frame = pd.DataFrame([
+            {"open_time": "2026-01-01T00:00:00Z", "open": 100.0, "close": 100.0},
+            {"open_time": "2026-01-01T00:15:00Z", "open": 110.0, "close": 110.0},
+        ])
+        frames = {"BTCUSDT": frame}
+        starts, ends = {"BTCUSDT": 0}, {"BTCUSDT": 2}
+        long_benchmark, long_name = benchmark_for_market_mode(
+            "spot_long", frames, starts, ends, 10000, 0, 0
+        )
+        short_benchmark, short_name = benchmark_for_market_mode(
+            "short_research", frames, starts, ends, 10000, 0, 0
+        )
+        self.assertEqual(long_name, "equal_weight_buy_and_hold")
+        self.assertEqual(long_benchmark["total_return_pct"], 10.0)
+        self.assertEqual(short_name, "cash_zero_return")
+        self.assertEqual(short_benchmark["total_return_pct"], 0.0)
+        self.assertEqual(short_benchmark["by_symbol"], {})
+
+    def test_unknown_benchmark_mode_is_rejected(self):
+        with self.assertRaises(ValueError):
+            benchmark_for_market_mode("spot_margin", {}, {}, {}, 10000, 0, 0)
 
 
 class RsiEdgeCaseTests(unittest.TestCase):
