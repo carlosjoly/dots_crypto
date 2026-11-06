@@ -25,6 +25,7 @@ def config():
         "atr_stop_multiple": 1.5, "min_risk_reward": 1.5,
         "swing_pullback_rsi_min": 45, "swing_pullback_rsi_max": 65,
         "swing_pullback_relative_volume": 1.2,
+        "swing_pullback_short_rsi_min": 35, "swing_pullback_short_rsi_max": 55,
     }}
 
 
@@ -73,6 +74,30 @@ class EdgeTriggeredSignalTests(unittest.TestCase):
         repeated = run_market_agents_enriched("BTCUSDT", "15m", frame.iloc[1:], config())
         self.assertFalse(any(x["agent"] == "Bot E — Swing trade" for x in repeated))
 
+
+
+    def test_15m_short_swing_requires_rally_retest_and_confirmed_breakdown(self):
+        frame = make_frame()
+        frame.loc[58, ["high", "low", "close", "sma20", "sma50", "rsi14", "rel_volume"]] = [
+            94, 90, 92, 95, 100, 50, 1.0
+        ]
+        frame.loc[59, ["high", "low", "close", "sma20", "sma50", "rsi14", "rel_volume"]] = [
+            90, 87, 88, 94, 100, 48, 1.3
+        ]
+        no_retest = run_market_agents_enriched("BTCUSDT", "15m", frame, config())
+        self.assertFalse(any(
+            x["agent"] == "Bot E — Swing trade"
+            and x["signal"] == "configuração potencial de baixa"
+            for x in no_retest
+        ))
+
+        frame.loc[58, "high"] = 96
+        confirmed = run_market_agents_enriched("BTCUSDT", "15m", frame, config())
+        self.assertEqual(sum(
+            x["agent"] == "Bot E — Swing trade"
+            and x["signal"] == "configuração potencial de baixa"
+            for x in confirmed
+        ), 1)
 
     def test_1h_and_4h_keep_the_previous_swing_transition_rule(self):
         for timeframe in ("1h", "4h"):
