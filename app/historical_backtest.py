@@ -169,13 +169,14 @@ def summarize_events(records):
     frame = pd.DataFrame(records)
     if frame.empty:
         return []
-    grouped = frame.groupby(["symbol", "timeframe", "agent", "horizon_bars", "split"], dropna=False)
+    grouped = frame.groupby(["symbol", "timeframe", "agent", "direction", "horizon_bars", "split"], dropna=False)
     summary = []
     for keys, group in grouped:
         values = group["net_return_pct"].astype(float)
         summary.append({
-            "symbol": keys[0], "timeframe": keys[1], "agent": keys[2],
-            "horizon_bars": int(keys[3]), "split": keys[4],
+            "symbol": keys[0], "timeframe": keys[1], "agent": keys[2], "direction": keys[3],
+            "market_mode": "spot_long" if keys[3] == "bullish" else "short_research",
+            "horizon_bars": int(keys[4]), "split": keys[5],
             "events": int(len(group)),
             "win_rate_pct": round(float((values > 0).mean() * 100), 3),
             "mean_net_return_pct": round(float(values.mean()), 5),
@@ -242,7 +243,7 @@ def run(days=180, fee_per_side_pct=0.10, slippage_per_side_pct=0.05):
         "horizons_bars": list(HORIZONS),
         "splits": {"train": "first 60%", "validation": "next 20%", "test": "last 20%"},
         "historical_market_filter": "24h quote volume is approximated from candle quote_volume; historical bid/ask spread is unavailable and therefore not reconstructed. Results are not an exact replay of live symbol eligibility.",
-        "warning": "Signals are evaluated independently and may overlap. Bearish outcomes are inverse directional returns, not short-selling trades. Results are not portfolio returns or calibrated probabilities.",
+        "warning": "Signals are evaluated independently and may overlap. Bullish outcomes are Spot-long directional studies; bearish outcomes are inverse directional research, not short-selling trades and not executable on Binance Spot. Results are not portfolio returns or calibrated probabilities.",
         "summary": summary,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
     manifest_path.write_text(json.dumps(dataset_manifest, ensure_ascii=False, indent=2), encoding="utf-8")
