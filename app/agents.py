@@ -44,23 +44,43 @@ def run_market_agents_enriched(symbol, tf, d, cfg):
                           "RSI alto e candle recente negativo com volume superior ao candle anterior; reversão não confirmada."))
     lookback = int(t["breakout_lookback"])
     prior = d.iloc[-lookback-1:-1]
-    if len(prior) == lookback and r["close"] > prior["high"].max() and rv >= t["relative_volume"]:
+    # Emit a breakout only on the crossing candle, not on every candle that
+    # remains beyond the rolling boundary after the initial breakout.
+    prior_before = d.iloc[-lookback-2:-2]
+    crossed_resistance = (
+        len(prior) == lookback and len(prior_before) == lookback
+        and r["close"] > prior["high"].max()
+        and prev["close"] <= prior_before["high"].max()
+    )
+    crossed_support = (
+        len(prior) == lookback and len(prior_before) == lookback
+        and r["close"] < prior["low"].min()
+        and prev["close"] >= prior_before["low"].min()
+    )
+    if crossed_resistance and rv >= t["relative_volume"]:
         out.append(_alert("Bot D — Rompimentos", symbol, tf, r, "possível rompimento de resistência",
-                          f"Fecho acima da máxima das {lookback} velas anteriores com volume relativo {rv:.2f}x; confirmar risco de falso rompimento."))
-    if len(prior) == lookback and r["close"] < prior["low"].min() and rv >= t["relative_volume"]:
+                          f"Fecho cruzou acima da máxima das {lookback} velas anteriores com volume relativo {rv:.2f}x; confirmar risco de falso rompimento."))
+    if crossed_support and rv >= t["relative_volume"]:
         out.append(_alert("Bot D — Rompimentos", symbol, tf, r, "possível rompimento de suporte",
-                          f"Fecho abaixo da mínima das {lookback} velas anteriores com volume relativo {rv:.2f}x; confirmar risco de falso rompimento."))
+                          f"Fecho cruzou abaixo da mínima das {lookback} velas anteriores com volume relativo {rv:.2f}x; confirmar risco de falso rompimento."))
     trend_up = r["close"] > r["sma20"] > r["sma50"]
     trend_down = r["close"] < r["sma20"] < r["sma50"]
+    previous_trend_up = prev["close"] > prev["sma20"] > prev["sma50"]
+    previous_trend_down = prev["close"] < prev["sma20"] < prev["sma50"]
     min_risk_reward = float(t.get("min_risk_reward", 1.5))
     if min_risk_reward <= 0:
         raise ValueError("thresholds.min_risk_reward must be greater than zero")
-    if trend_up and 40 <= r["rsi14"] <= 68 and rv >= 1.0:
+    swing_long = trend_up and 40 <= r["rsi14"] <= 68 and rv >= 1.0
+    previous_swing_long = previous_trend_up and 40 <= prev["rsi14"] <= 68 and prev["rel_volume"] >= 1.0
+    swing_short = trend_down and 32 <= r["rsi14"] <= 60 and rv >= 1.0
+    previous_swing_short = previous_trend_down and 32 <= prev["rsi14"] <= 60 and prev["rel_volume"] >= 1.0
+    # Swing setup is an entry event: emit once when the complete setup becomes true.
+    if swing_long and not previous_swing_long:
         stop = float(r["close"] - t["atr_stop_multiple"] * r["atr14"])
         target = float(r["close"] + min_risk_reward * (r["close"] - stop))
         out.append(_alert("Bot E — Swing trade", symbol, tf, r, "configuração potencial de alta",
                           f"Tendência SMA20>SMA50, RSI={r['rsi14']:.1f}; referência técnica, não recomendação. Invalidação indicativa: {stop:.8g}; objetivo ilustrativo: {target:.8g}."))
-    elif trend_down and 32 <= r["rsi14"] <= 60 and rv >= 1.0:
+    elif swing_short and not previous_swing_short:
         stop = float(r["close"] + t["atr_stop_multiple"] * r["atr14"])
         target = float(r["close"] - min_risk_reward * (stop - r["close"]))
         out.append(_alert("Bot E — Swing trade", symbol, tf, r, "configuração potencial de baixa",
