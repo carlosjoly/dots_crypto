@@ -62,8 +62,8 @@ class BacktestCooldownTests(unittest.TestCase):
             "open_time": timestamps,
             "quote_volume": [10.0] * 57,
             "open": [100.0] * 57, "high": [101.0] * 57,
-            "low": [99.0] * 57, "close": [100.0] * 56,
-            "volume": [1.0] * 57, "atr14": [1.0] * 56,
+            "low": [99.0] * 57, "close": [100.0] * 57,
+            "volume": [1.0] * 57, "atr14": [1.0] * 57,
         })
         alert = {"agent": "Bot A", "signal": "movimento de alta"}
         cfg = {"exchange": {"min_quote_volume_24h_usdt": 0},
