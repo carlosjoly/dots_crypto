@@ -241,6 +241,10 @@ def buy_and_hold_benchmark(frames, starts, ends, initial_cash, fee_per_side_pct,
 
 def _make_events(symbol, timeframe, raw, cfg):
     data = enrich(raw)
+    cooldown_minutes = float(cfg.get("alerts", {}).get("cooldown_minutes", 0))
+    if cooldown_minutes < 0:
+        raise ValueError("alerts.cooldown_minutes cannot be negative")
+    last_signal_at = {}
     bars_24h = BARS_PER_24H[timeframe]
     data["quote_volume_24h"] = data["quote_volume"].rolling(bars_24h).sum()
     minimum = float(cfg["exchange"]["min_quote_volume_24h_usdt"])
@@ -253,12 +257,19 @@ def _make_events(symbol, timeframe, raw, cfg):
         window = data.iloc[max(0, i - 54):i + 1]
         for alert in run_market_agents_enriched(symbol, timeframe, window, cfg):
             direction = signal_direction(alert)
+            signal_time = pd.Timestamp(data.iloc[i]["open_time"])
+            cooldown_key = (alert["agent"], alert["signal"])
+            previous_time = last_signal_at.get(cooldown_key)
+            if (cooldown_minutes > 0 and previous_time is not None
+                    and signal_time < previous_time + pd.Timedelta(minutes=cooldown_minutes)):
+                continue
             atr_value = float(data.iloc[i]["atr14"])
             if np.isfinite(atr_value) and atr_value > 0:
                 events[alert["agent"]].append({
                     "symbol": symbol, "signal_index": i, "entry_index": i + 1,
                     "direction": direction, "atr": atr_value, "signal": alert["signal"],
                 })
+                last_signal_at[cooldown_key] = signal_time
     return data, events
 
 
