@@ -248,7 +248,10 @@ def _make_events(symbol, timeframe, raw, cfg):
     for i in range(max(54, bars_24h - 1), len(data) - 1):
         if not np.isfinite(data.iloc[i]["quote_volume_24h"]) or data.iloc[i]["quote_volume_24h"] < minimum:
             continue
-        for alert in run_market_agents_enriched(symbol, timeframe, data.iloc[:i + 1], cfg):
+        # Agents inspect only the current candle, its previous candle and a bounded
+        # breakout lookback. A 55-candle tail is sufficient and avoids O(n^2) slicing.
+        window = data.iloc[max(0, i - 54):i + 1]
+        for alert in run_market_agents_enriched(symbol, timeframe, window, cfg):
             direction = signal_direction(alert)
             atr_value = float(data.iloc[i]["atr14"])
             if np.isfinite(atr_value) and atr_value > 0:
