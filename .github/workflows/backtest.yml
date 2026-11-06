@@ -1,6 +1,14 @@
 name: Dot Cripto Historical Backtest
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - app/agents.py
+      - app/portfolio_backtest.py
+      - app/historical_backtest.py
+      - config.yaml
   workflow_dispatch:
     inputs:
       days:
@@ -39,15 +47,15 @@ jobs:
       - name: Download candles and run point-in-time event study
         run: >-
           python -m app.historical_backtest
-          --days "${{ inputs.days }}"
-          --fee-per-side-pct "${{ inputs.fee_per_side_pct }}"
-          --slippage-per-side-pct "${{ inputs.slippage_per_side_pct }}"
+          --days "${{ inputs.days || '180' }}"
+          --fee-per-side-pct "${{ inputs.fee_per_side_pct || '0.10' }}"
+          --slippage-per-side-pct "${{ inputs.slippage_per_side_pct || '0.05' }}"
       - name: Run portfolio backtest and enforce positive out-of-sample returns
         run: >-
           python -m app.portfolio_backtest
-          --days "${{ inputs.days }}"
-          --fee-per-side-pct "${{ inputs.fee_per_side_pct }}"
-          --slippage-per-side-pct "${{ inputs.slippage_per_side_pct }}"
+          --days "${{ inputs.days || '180' }}"
+          --fee-per-side-pct "${{ inputs.fee_per_side_pct || '0.10' }}"
+          --slippage-per-side-pct "${{ inputs.slippage_per_side_pct || '0.05' }}"
       - name: Upload historical sample and results
         if: always()
         uses: actions/upload-artifact@v4
