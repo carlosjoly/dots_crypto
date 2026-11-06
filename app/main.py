@@ -9,6 +9,7 @@ from .agents import run_market_agents, disabled_agent_status
 from .new_launches import scan_new_launches, release_seen_token
 from .bot_g import run_bot_g_observer
 from .alerts import emit_alert
+from .cooldown import CooldownStore
 from .logging_setup import setup_logging
 
 log = logging.getLogger("dot_cripto")
@@ -21,7 +22,7 @@ def _append_jsonl(path, record):
         handle.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
 
 
-def process_active_market_agents(cfg, base, candidates):
+def process_active_market_agents(cfg, base, candidates, cooldown_store=None):
     """Run Bots A-E; continue after isolated errors but report an incomplete cycle."""
     sent = 0
     failures = []
@@ -36,7 +37,13 @@ def process_active_market_agents(cfg, base, candidates):
                     alert["best_ask"] = market_snapshot["ask"]
                     alert["market_filter_snapshot_utc"] = market_snapshot["collected_at_utc"]
                     alert["market_filter_max_spread_pct"] = float(cfg["exchange"]["max_spread_pct"])
+                    if cooldown_store is not None and not cooldown_store.allows(alert, tf):
+                        log.info("Cooldown ativo: %s %s %s (%s); alerta suprimido.",
+                                 alert["agent"], symbol, tf, alert["signal"])
+                        continue
                     emit_alert(cfg, alert)
+                    if cooldown_store is not None:
+                        cooldown_store.record(alert, tf)
                     sent += 1
                     log.info("Alerta: %s %s %s; spread=%.5f%%", alert["agent"], symbol, tf, alert["spread_pct"])
             except Exception as exc:
@@ -108,7 +115,11 @@ def main():
                 "symbol": symbol, "decision": "error", "reason": type(exc).__name__,
             })
 
-    sent, market_failures = process_active_market_agents(cfg, base, candidates)
+    cooldown_minutes = float(cfg.get("alerts", {}).get("cooldown_minutes", 0))
+    cooldown_store = CooldownStore(
+        Path(cfg["_root"]) / "data" / "alert_cooldown.json", cooldown_minutes
+    )
+    sent, market_failures = process_active_market_agents(cfg, base, candidates, cooldown_store)
     cycle_failures.extend(
         {"stage": "active_agent_cycle", **failure} for failure in market_failures
     )
