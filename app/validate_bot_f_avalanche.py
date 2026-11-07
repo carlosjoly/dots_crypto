@@ -34,6 +34,11 @@ QUALITY_FIELDS = (
     "base_token_price_usd",
     "quote_token_price_usd",
 )
+# A valid pool address is needed for a direct pool link, but not for token screening:
+# some GeckoTerminal resource IDs are 32-byte hashes rather than EVM addresses.
+SCREENING_REQUIRED_FIELDS = tuple(
+    field for field in QUALITY_FIELDS if field != "pool_address"
+)
 
 
 def _pool_quality(pool, now):
@@ -88,6 +93,8 @@ def validate():
         "field_quality": {},
         "complete_record_count": 0,
         "complete_record_pct": None,
+        "screening_complete_record_count": 0,
+        "screening_complete_record_pct": None,
         "pool_age_minutes": {},
         "future_created_at_count": 0,
         "spread_data_available": False,
@@ -95,6 +102,7 @@ def validate():
             "GeckoTerminal new_pools não fornece livro bid/ask; spread executável não é medido neste teste.",
             "A paginação é limitada a três páginas; atingir o limite não comprova cobertura total da rede.",
             "Qualidade dos campos não equivale a aprovação de mercado nem à triagem GoPlus.",
+            "pool_address é opcional para triagem do token; sua ausência impede apenas o link direto para o pool.",
         ],
     }
     all_pools = []
@@ -231,6 +239,7 @@ def validate():
     if all_pools:
         counts = {field: 0 for field in QUALITY_FIELDS}
         complete = 0
+        screening_complete = 0
         ages = []
         future_count = 0
         for pool in all_pools:
@@ -241,6 +250,9 @@ def validate():
             for field, valid in checks.items():
                 counts[field] += int(valid)
             complete += int(all(checks.values()))
+            screening_complete += int(
+                all(checks[field] for field in SCREENING_REQUIRED_FIELDS)
+            )
             if age_minutes is not None:
                 ages.append(age_minutes)
         total = len(all_pools)
@@ -254,6 +266,10 @@ def validate():
         }
         result["complete_record_count"] = complete
         result["complete_record_pct"] = round(complete / total * 100, 2)
+        result["screening_complete_record_count"] = screening_complete
+        result["screening_complete_record_pct"] = round(
+            screening_complete / total * 100, 2
+        )
         result["quality_status"] = "measured"
         result["future_created_at_count"] = future_count
         if ages:
