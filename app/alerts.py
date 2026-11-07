@@ -234,6 +234,10 @@ def format_message(alert):
         extra_lines.append(f"Contrato: {alert['token_address']}")
     if alert.get("pool_url"):
         extra_lines.append(f"Pool: {alert['pool_url']}")
+    elif alert.get("pool_id"):
+        extra_lines.append(
+            f"ID do pool GeckoTerminal (endereço não disponível): {alert['pool_id']}"
+        )
     if alert.get("liquidity_usd") is not None:
         extra_lines.append(f"Liquidez observada: US$ {_number(alert['liquidity_usd'], 2)}")
     if alert.get("volume_24h_usd") is not None:

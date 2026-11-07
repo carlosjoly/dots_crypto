@@ -169,6 +169,8 @@ class BotFGeckoTerminalTests(unittest.TestCase):
         self.assertEqual(result["unique_pool_count"], 2)
         self.assertEqual(result["duplicate_pool_count"], 1)
         self.assertEqual(result["complete_record_count"], 2)
+        self.assertEqual(result["screening_complete_record_count"], 2)
+        self.assertEqual(result["screening_complete_record_pct"], 100.0)
         self.assertEqual(result["field_quality"]["base_token_price_usd"]["coverage_pct"], 100.0)
         self.assertEqual(result["field_quality"]["quote_token_price_usd"]["coverage_pct"], 100.0)
         self.assertEqual(result["field_quality"]["pool_address"]["coverage_pct"], 100.0)
@@ -259,6 +261,34 @@ class BotFGeckoTerminalTests(unittest.TestCase):
         self.assertEqual(result["complete_record_count"], 0)
         self.assertEqual(result["field_quality"]["pool_address"]["invalid_or_missing"], 1)
         self.assertEqual(result["field_quality"]["liquidity_usd"]["coverage_pct"], 0.0)
+
+    def test_missing_pool_address_does_not_reduce_screening_completeness(self):
+        now = datetime.now(timezone.utc)
+        pool = {
+            "pool_id": "avax_0x" + "a" * 64,
+            "pool_address": None,
+            "pool_address_source": "missing_or_invalid",
+            "created_at": (now - timedelta(minutes=30)).isoformat(),
+            "liquidity_usd": "50000",
+            "volume_24h_usd": "25000",
+            "txns_24h": {"buys": 40, "sells": 35},
+            "base": {"address": "0x" + "1" * 40},
+            "quote": {"address": "0x" + "2" * 40},
+            "base_price_usd": "0.5",
+            "quote_price_usd": "1.0",
+        }
+        with patch.object(
+            avalanche_validation, "fetch_new_pools", side_effect=[[pool], []]
+        ), patch.object(
+            avalanche_validation, "search_pools_by_resource_id", return_value={"data": []}
+        ), patch.object(avalanche_validation.time, "sleep"):
+            result = avalanche_validation.validate()
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["complete_record_count"], 0)
+        self.assertEqual(result["screening_complete_record_count"], 1)
+        self.assertEqual(result["screening_complete_record_pct"], 100.0)
+        self.assertEqual(result["field_quality"]["pool_address"]["coverage_pct"], 0.0)
 
     def test_avalanche_validator_does_not_call_empty_collection_success(self):
         with patch.object(avalanche_validation, "fetch_new_pools", return_value=[]):

@@ -225,6 +225,14 @@ def _created_at(value):
     except (ValueError, TypeError, OverflowError):
         return None
 
+def _pool_url(network, pool):
+    """Return a GeckoTerminal pool URL only when a valid EVM pool address exists."""
+    address = str(pool.get("pool_address") or "").strip()
+    if not re.fullmatch(r"0x[a-fA-F0-9]{40}", address):
+        return None
+    return f"https://www.geckoterminal.com/{gecko_network_id(network)}/pools/{address}"
+
+
 def _select_token(pool, quote_symbols):
     base = pool.get("base") or {}
     quote = pool.get("quote") or {}
@@ -403,7 +411,8 @@ def scan_new_launches(cfg):
                 ),
                 "candle_time_utc": now.isoformat(),
                 "pool_created_at_utc": created.isoformat() if created else None,
-                "pool_url": f"https://www.geckoterminal.com/{gecko_network_id(network)}/pools/{pool.get('pool_address')}",
+                "pool_url": _pool_url(network, pool),
+                "pool_id": pool.get("pool_id"),
                 "token_address": token["address"],
                 "network": network,
                 "chain_id": chain_id,
