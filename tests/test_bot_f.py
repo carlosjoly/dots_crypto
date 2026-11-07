@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 import requests
 
-from app.new_launches import _get_json, _market_eligibility, _select_token, _load_seen, _save_seen, release_seen_token
+from app.new_launches import _get_json, _market_eligibility, _select_token, _pool_url, _load_seen, _save_seen, release_seen_token
 from app.security import evaluate_launch_security, get_goplus_access_token
 import hashlib
 from app.alerts import format_message
@@ -42,6 +42,15 @@ class BotFScreeningTests(unittest.TestCase):
         self.assertEqual(token["symbol"], "NEW")
         self.assertEqual(token["address"], "0x" + "2" * 40)
         self.assertEqual(token["price_usd"], 0.25)
+
+    def test_pool_url_requires_a_valid_evm_pool_address(self):
+        valid_address = "0x" + "a" * 40
+        self.assertEqual(
+            _pool_url("avalanche", {"pool_address": valid_address}),
+            f"https://www.geckoterminal.com/avax/pools/{valid_address}",
+        )
+        self.assertIsNone(_pool_url("avalanche", {"pool_address": None}))
+        self.assertIsNone(_pool_url("avalanche", {"pool_address": "0x" + "b" * 64}))
 
     def test_market_filters_require_age_liquidity_volume_and_transactions(self):
         ok, _ = _market_eligibility(self.pool, self.cfg, self.now)
@@ -111,6 +120,25 @@ class BotFScreeningTests(unittest.TestCase):
         self.assertNotIn("Invalidação: US$ N/D", message)
         self.assertNotIn("Objetivo ilustrativo: US$ N/D", message)
         self.assertNotIn("\\\\n", message)
+
+    def test_bot_f_alert_shows_pool_id_when_direct_pool_url_is_unavailable(self):
+        pool_id = "avax_0x" + "a" * 64
+        message = format_message({
+            "agent": "Bot F — Novos lançamentos",
+            "symbol": "NEW",
+            "timeframe": "Lançamento DEX",
+            "price": 0.25,
+            "signal": "CANDIDATO A ANÁLISE",
+            "pool_id": pool_id,
+            "pool_url": None,
+            "token_address": "0x" + "b" * 40,
+            "chain_id": "43114",
+            "network": "avalanche",
+            "candle_time_utc": "2026-11-07T18:00:00+00:00",
+        })
+        self.assertIn(pool_id, message)
+        self.assertIn("endereço não disponível", message)
+        self.assertNotIn("/pools/None", message)
 
     def test_failed_delivery_releases_token_from_seen_state(self):
         with tempfile.TemporaryDirectory() as directory:
