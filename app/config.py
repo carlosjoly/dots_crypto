@@ -13,6 +13,7 @@ def load_config():
     cfg["_env"] = {
         "telegram_bot_token": os.getenv("TELEGRAM_BOT_TOKEN", "").strip(),
         "telegram_chat_id": os.getenv("TELEGRAM_CHAT_ID", "").strip(),
+        "bot_f_enabled": os.getenv("BOT_F_ENABLED", "true").strip().lower() == "true",
         "lunarcrush_enabled": bool(
             os.getenv("LUNARCRUSH_API_KEY", "").strip()
             or os.getenv("SOCIAL_API_KEY", "").strip()
