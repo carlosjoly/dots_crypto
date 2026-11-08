@@ -1,5 +1,5 @@
 """Discovery and fail-closed screening of newly created EVM DEX pools."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import json
 import logging
@@ -16,7 +16,7 @@ log = logging.getLogger("dot_cripto.bot_f")
 GECKO_BASE = "https://api.geckoterminal.com/api/v2"
 TIMEOUT = 15
 # GeckoTerminal's public limit is approximately 10 calls/minute; keep a safety margin.
-REQUEST_INTERVAL_SECONDS = 10
+REQUEST_INTERVAL_SECONDS = 12
 MAX_RETRIES = 3
 RETRY_JITTER_SECONDS = 2
 MIN_RETRY_AFTER_SECONDS = REQUEST_INTERVAL_SECONDS
@@ -306,6 +306,36 @@ def _save_seen(path, seen, limit=5000):
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(sorted(seen)[-limit:], ensure_ascii=False), encoding="utf-8")
 
+def _load_review_state(path):
+    """Load temporary review decisions without changing the permanent seen set."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_review_state(path, state):
+    """Persist review timestamps atomically so scheduled runs can share cooldowns."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix(target.suffix + ".tmp")
+    temporary.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+    temporary.replace(target)
+
+
+def _review_recheck_due(identity, review_state, now, interval_minutes=30):
+    """Recheck a review-required token only after its configured cooldown."""
+    record = review_state.get(identity)
+    checked_at = _created_at(record.get("checked_at") if isinstance(record, dict) else record)
+    if checked_at is None:
+        return True
+    age_seconds = (now - checked_at).total_seconds()
+    if age_seconds < -300:
+        return True
+    return age_seconds >= max(1.0, float(interval_minutes)) * 60
+
+
 def release_seen_token(cfg, alert):
     """Allow a failed Telegram delivery to be retried on the next scheduled cycle."""
     token_address = alert.get("token_address")
@@ -327,6 +357,16 @@ def scan_new_launches(cfg):
     now = datetime.now(timezone.utc)
     state_path = Path(cfg["_root"]) / settings["seen_state_file"]
     seen = _load_seen(state_path)
+    review_state_path = Path(cfg["_root"]) / settings.get(
+        "review_state_file", "data/bot_f_review_state.json"
+    )
+    review_state = _load_review_state(review_state_path)
+    review_recheck_minutes = max(1.0, float(settings.get("review_recheck_minutes", 30)))
+    review_cutoff = now - timedelta(days=7)
+    for identity, record in list(review_state.items()):
+        checked_at = _created_at(record.get("checked_at") if isinstance(record, dict) else record)
+        if checked_at is None or checked_at < review_cutoff:
+            review_state.pop(identity, None)
     alerts = []
     examined = 0
     checked_this_cycle = set()
@@ -365,6 +405,8 @@ def scan_new_launches(cfg):
             identity = f"{chain_id}:{token['address']}"
             if identity in seen or identity in checked_this_cycle:
                 continue
+            if not _review_recheck_due(identity, review_state, now, review_recheck_minutes):
+                continue
             eligible, market_reason = _market_eligibility(pool, cfg, now)
             if not eligible:
                 continue
@@ -398,14 +440,21 @@ def scan_new_launches(cfg):
 
             if assessment["status"] == "rejected":
                 seen.add(identity)
-            if assessment["status"] != "eligible_for_watchlist":
+                review_state.pop(identity, None)
+            elif assessment["status"] != "eligible_for_watchlist":
+                review_state[identity] = {
+                    "checked_at": now.isoformat(),
+                    "flags": list(assessment.get("flags") or []),
+                }
                 log.info(
                     "Bot F rejeitado/revisão: %s %s — %s",
                     network, token["address"], "; ".join(assessment["flags"]),
                 )
                 continue
+            else:
+                seen.add(identity)
+                review_state.pop(identity, None)
 
-            seen.add(identity)
             created = _created_at(pool.get("created_at"))
             network_summary[network]["approved"] += 1
             alerts.append({
@@ -445,6 +494,7 @@ def scan_new_launches(cfg):
                 "market_filter": market_reason,
             })
     _save_seen(state_path, seen)
+    _save_review_state(review_state_path, review_state)
     for network, stats in network_summary.items():
         log.info("Bot F resumo rede: network_config=%s; gecko_slug=%s; status=%s; pools=%d; "
                  "market_eligible=%d; security_checked=%d; approved=%d.",
