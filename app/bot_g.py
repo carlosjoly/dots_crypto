@@ -227,8 +227,7 @@ def _emit_social_alerts(cfg, state, snapshots, now):
         # from the baseline; only an earlier observation may confirm acceleration.
         previous = history[-2] if len(history) >= 2 else None
         freshness_status, quality_reason = _snapshot_quality(snapshot, now)
-        if freshness_status in {"invalid_collection_timestamp", "stale_collection", "invalid_metrics",
-                                "invalid_source_timestamp", "stale_source"}:
+        if freshness_status != "verified_fresh":
             log.warning("Bot G decisão %s: DESCARTADO — qualidade/frescor inválido (%s): %s.",
                         symbol, freshness_status, quality_reason)
             continue
