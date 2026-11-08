@@ -15,7 +15,7 @@ Criar um job independente com:
 - Título: `dots_crypto - Bot F - cada 5 minutos`
 - Agenda: a cada 5 minutos.
 - Método: `POST`
-- URL: `https://api.github.com/repos/carlosjoly/dots_crypto/actions/workflows/BOT_F_WORKFLOW_ID/dispatches`
+- URL: `https://api.github.com/repos/carlosjoly/dots_crypto/actions/workflows/bot-f-discovery.yml/dispatches`
 - Headers:
   - `Accept: application/vnd.github+json`
   - `Authorization: Bearer SEU_FINE_GRAINED_TOKEN`
