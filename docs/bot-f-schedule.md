@@ -33,3 +33,9 @@ O token precisa de permissão **Actions: Read and write** no repositório. Não 
 4. A concorrência do Bot F é serializada pelo GitHub Actions; se uma execução demorar mais que 5 minutos, a próxima aguarda, não cancela a anterior.
 5. Verificar a duração real por pelo menos 24 horas antes de reduzir o intervalo.
 6. O Bot F permanece apenas informativo; não executa ordens.
+
+## Ajustes após a observação operacional
+
+- O Bot F usa intervalo de 12 segundos entre consultas às redes GeckoTerminal e backoff mínimo de 12 segundos após HTTP 429.
+- Candidatos em `review_required` são reavaliados após 30 minutos, não em todos os ciclos de 5 minutos. O estado é persistido em `data/bot_f_review_state.json` e restaurado pelo workflow.
+- Candidatos aprovados ou rejeitados definitivamente continuam protegidos pelo estado permanente de deduplicação.

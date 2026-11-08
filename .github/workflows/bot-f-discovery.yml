@@ -31,6 +31,13 @@ jobs:
           key: bot-f-seen-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
             bot-f-seen-${{ runner.os }}-${{ github.ref_name }}-
+      - name: Restore Bot F review cooldown state
+        uses: actions/cache/restore@v4
+        with:
+          path: data/bot_f_review_state.json
+          key: bot-f-review-state-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            bot-f-review-state-${{ runner.os }}-${{ github.ref_name }}-
       - name: Restore Bot F API telemetry
         uses: actions/cache/restore@v4
         with:
@@ -54,6 +61,12 @@ jobs:
         with:
           path: data/bot_f_seen.json
           key: bot-f-seen-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+      - name: Save Bot F review cooldown state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/bot_f_review_state.json
+          key: bot-f-review-state-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
       - name: Save Bot F API telemetry
         if: always()
         uses: actions/cache/save@v4

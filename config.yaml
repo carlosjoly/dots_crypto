@@ -42,6 +42,8 @@ launches:
   max_buy_sell_tax: 0.05
   quote_symbols: ["USDC", "USDT", "WETH", "WBNB", "DAI", "USDBC", "USDE"]
   seen_state_file: "data/bot_f_seen.json"
+  review_state_file: "data/bot_f_review_state.json"
+  review_recheck_minutes: 30
 
 security:
   goplus_enabled: true
