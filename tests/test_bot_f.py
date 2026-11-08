@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 import requests
 
-from app.new_launches import _get_json, _market_eligibility, _select_token, _pool_url, _load_seen, _save_seen, release_seen_token, _holder_count_review_reason
+from app.new_launches import _get_json, _market_eligibility, _select_token, _pool_url, _load_seen, _save_seen, _load_review_state, _save_review_state, _review_recheck_due, release_seen_token, _holder_count_review_reason
 from app.security import evaluate_launch_security, get_goplus_access_token
 import hashlib
 from app.alerts import format_message
@@ -189,7 +189,7 @@ class BotFScreeningTests(unittest.TestCase):
         mock_get.side_effect = [error, success]
 
         self.assertEqual(_get_json("https://example.test"), {"data": []})
-        mock_sleep.assert_called_once_with(10)
+        mock_sleep.assert_called_once_with(12)
         self.assertEqual(mock_get.call_count, 2)
 
     @patch("app.new_launches.time.sleep")
@@ -205,7 +205,7 @@ class BotFScreeningTests(unittest.TestCase):
         mock_get.side_effect = [error, success]
 
         self.assertEqual(_get_json("https://example.test"), {"data": []})
-        mock_sleep.assert_called_once_with(10)
+        mock_sleep.assert_called_once_with(12)
         self.assertEqual(mock_get.call_count, 2)
 
     @patch("app.new_launches.time.sleep")
@@ -221,7 +221,7 @@ class BotFScreeningTests(unittest.TestCase):
         mock_get.side_effect = [error, success]
 
         self.assertEqual(_get_json("https://example.test"), {"data": []})
-        mock_sleep.assert_called_once_with(10)
+        mock_sleep.assert_called_once_with(12)
         self.assertEqual(mock_get.call_count, 2)
 
     @patch("app.new_launches.random.uniform", return_value=0.5)
@@ -238,7 +238,7 @@ class BotFScreeningTests(unittest.TestCase):
         mock_get.side_effect = [error, success]
 
         self.assertEqual(_get_json("https://example.test"), {"data": []})
-        mock_sleep.assert_called_once_with(10.5)
+        mock_sleep.assert_called_once_with(12.5)
         self.assertEqual(mock_get.call_count, 2)
 
     @patch("app.new_launches.random.uniform", return_value=0.25)
@@ -257,7 +257,7 @@ class BotFScreeningTests(unittest.TestCase):
         self.assertEqual(mock_get.call_count, 4)
         self.assertEqual(
             [call.args[0] for call in mock_sleep.call_args_list],
-            [10.25, 20.25, 40.25],
+            [12.25, 24.25, 48.25],
         )
 
     def test_seen_state_round_trip(self):
@@ -265,6 +265,24 @@ class BotFScreeningTests(unittest.TestCase):
             path = Path(directory) / "seen.json"
             _save_seen(path, {"1:0xabc", "56:0xdef"})
             self.assertEqual(_load_seen(path), {"1:0xabc", "56:0xdef"})
+
+    def test_review_state_round_trip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "review.json"
+            state = {"56:0xabc": {"checked_at": self.now.isoformat(), "flags": ["holder_count baixo"]}}
+            _save_review_state(path, state)
+            self.assertEqual(_load_review_state(path), state)
+
+    def test_review_candidate_waits_thirty_minutes_before_goplus_recheck(self):
+        identity = "56:0xabc"
+        state = {identity: {"checked_at": self.now.isoformat()}}
+        self.assertFalse(_review_recheck_due(identity, state, self.now + timedelta(minutes=5), 30))
+        self.assertFalse(_review_recheck_due(identity, state, self.now + timedelta(minutes=29), 30))
+        self.assertTrue(_review_recheck_due(identity, state, self.now + timedelta(minutes=30), 30))
+
+    def test_invalid_review_timestamp_is_rechecked_instead_of_permanently_skipped(self):
+        self.assertTrue(_review_recheck_due("56:0xabc", {"56:0xabc": {"checked_at": "invalid"}}, self.now, 30))
+        self.assertTrue(_review_recheck_due("56:0xabc", {}, self.now, 30))
 
 
 if __name__ == "__main__":
