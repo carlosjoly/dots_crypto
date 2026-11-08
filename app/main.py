@@ -124,7 +124,7 @@ def main():
         {"stage": "active_agent_cycle", **failure} for failure in market_failures
     )
 
-    if cfg.get("launches", {}).get("enabled", False):
+    if cfg.get("launches", {}).get("enabled", False) and cfg["_env"].get("bot_f_enabled", True):
         try:
             launch_alerts = scan_new_launches(cfg)
             for alert in launch_alerts:
@@ -138,6 +138,9 @@ def main():
             log.info("Bot F concluído. Candidatos aprovados para watchlist=%d", len(launch_alerts))
         except Exception:
             log.exception("Bot F indisponível neste ciclo; nenhum candidato foi aprovado sem validação.")
+
+    elif cfg.get("launches", {}).get("enabled", False):
+        log.info("Bot F não executado neste workflow; execução independente agendada separadamente.")
 
     try:
         bot_g_result = run_bot_g_observer(cfg)
