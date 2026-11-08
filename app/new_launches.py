@@ -251,6 +251,21 @@ def _select_token(pool, quote_symbols):
         "price_usd": _number(price),
     }
 
+def _holder_count_review_reason(security, min_holder_count):
+    """Return a review reason when holder distribution is unknown or too concentrated."""
+    raw = security.get("holder_count") if isinstance(security, dict) else None
+    try:
+        count_value = float(raw)
+        if not count_value.is_integer() or count_value < 0:
+            raise ValueError()
+    except (TypeError, ValueError, OverflowError):
+        return "holder_count: não informado ou inválido; revisão manual obrigatória"
+    count = int(count_value)
+    if count < int(min_holder_count):
+        return f"holder_count={count}: abaixo do mínimo configurado ({int(min_holder_count)}); revisão manual obrigatória"
+    return None
+
+
 def _market_eligibility(pool, cfg, now=None):
     now = now or datetime.now(timezone.utc)
     created = _created_at(pool.get("created_at"))
@@ -369,6 +384,13 @@ def scan_new_launches(cfg):
                 assessment = evaluate_launch_security(
                     security, max_tax=float(settings["max_buy_sell_tax"])
                 )
+                if assessment["status"] != "rejected":
+                    holder_reason = _holder_count_review_reason(
+                        security, settings.get("min_holder_count", 10)
+                    )
+                    if holder_reason:
+                        assessment["status"] = "review_required"
+                        assessment["flags"].append(holder_reason)
             except Exception:
                 log.exception("Bot F: GoPlus indisponível para %s:%s", network, token["address"])
                 # Do not mark as seen: a later cycle may obtain a valid security response.

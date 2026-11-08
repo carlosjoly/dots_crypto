@@ -37,6 +37,7 @@ launches:
   min_liquidity_usd: 25000
   min_volume_24h_usd: 10000
   min_txns_24h: 50
+  min_holder_count: 10
   max_security_checks_per_cycle: 15
   max_buy_sell_tax: 0.05
   quote_symbols: ["USDC", "USDT", "WETH", "WBNB", "DAI", "USDBC", "USDE"]

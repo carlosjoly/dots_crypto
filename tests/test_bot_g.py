@@ -134,19 +134,35 @@ class BotGObserverTests(unittest.TestCase):
     @patch("app.bot_g.emit_alert")
     @patch("app.bot_g.fetch_social_snapshots")
     @patch("app.bot_g.goplus_token_security", side_effect=RuntimeError("provider failure"))
-    def test_first_extreme_sentiment_emits_preliminary_telegram_alert(self, goplus, fetch, emit):
+    def test_unverified_source_freshness_blocks_preliminary_social_alert(self, goplus, fetch, emit):
         snapshots = {k: dict(v, sentiment=82) for k, v in self.snapshots.items()}
+        fetch.return_value = snapshots
+        result = run_bot_g_observer(self.cfg, self.now)
+        self.assertEqual(result["alerts"], 0)
+        emit.assert_not_called()
+        state = json.loads((Path(self.temp.name) / "data" / "bot_g_social_history.json").read_text())
+        self.assertNotIn("BTCUSDT", state["alerts"])
+
+    @patch.dict(os.environ, {"SOCIAL_API_KEY": "test-key"})
+    @patch("app.bot_g.emit_alert")
+    @patch("app.bot_g.fetch_social_snapshots")
+    @patch("app.bot_g.goplus_token_security", side_effect=RuntimeError("provider failure"))
+    def test_verified_fresh_first_extreme_sentiment_emits_preliminary_alert(self, goplus, fetch, emit):
+        snapshots = {
+            k: dict(v, sentiment=82, source_updated_at=self.now.isoformat())
+            for k, v in self.snapshots.items()
+        }
         fetch.return_value = snapshots
         result = run_bot_g_observer(self.cfg, self.now)
         self.assertEqual(result["alerts"], 4)
         self.assertEqual(emit.call_count, 4)
         alert = emit.call_args_list[0].args[1]
         self.assertEqual(alert["agent"], "BOT G — VALIDAÇÃO SOCIAL")
+        self.assertTrue(alert["source_freshness_verified"])
         self.assertIsNone(alert["social_volume_acceleration_pct"])
         message = format_message(alert)
         self.assertIn("BOT G — VALIDAÇÃO SOCIAL", message)
         self.assertIn("SENTIMENTO SOCIAL POSITIVO", message)
-        self.assertIn("atualização temporal das métricas sociais", message)
         state = json.loads((Path(self.temp.name) / "data" / "bot_g_social_history.json").read_text())
         self.assertIn("last_sent_at", state["alerts"]["BTCUSDT"])
 
@@ -171,7 +187,7 @@ class BotGObserverTests(unittest.TestCase):
         }
         (state_dir / "bot_g_social_history.json").write_text(json.dumps(prior))
         current = {
-            symbol: dict(snapshot, social_volume_24h=135, sentiment=80)
+            symbol: dict(snapshot, social_volume_24h=135, sentiment=80, source_updated_at=self.now.isoformat())
             for symbol, snapshot in self.snapshots.items()
         }
         fetch.return_value = current
@@ -202,7 +218,7 @@ class BotGObserverTests(unittest.TestCase):
         }
         (state_dir / "bot_g_social_history.json").write_text(json.dumps(prior))
         current = {
-            symbol: dict(snapshot, social_volume_24h=140, sentiment=80)
+            symbol: dict(snapshot, social_volume_24h=140, sentiment=80, source_updated_at=self.now.isoformat())
             for symbol, snapshot in self.snapshots.items()
         }
         fetch.return_value = current
@@ -217,7 +233,7 @@ class BotGObserverTests(unittest.TestCase):
     def test_missing_telegram_configuration_keeps_signal_pending_and_does_not_consume_cooldown(self, fetch, emit):
         self.cfg["_env"] = {}
         fetch.return_value = {
-            symbol: dict(snapshot, sentiment=80)
+            symbol: dict(snapshot, sentiment=80, source_updated_at=self.now.isoformat())
             for symbol, snapshot in self.snapshots.items()
         }
         with patch("app.bot_g.goplus_token_security", side_effect=RuntimeError("provider failure")):
@@ -250,7 +266,7 @@ class BotGObserverTests(unittest.TestCase):
     @patch("app.bot_g.goplus_token_security", side_effect=RuntimeError("provider failure"))
     def test_failed_telegram_delivery_does_not_consume_cooldown(self, goplus, fetch, emit):
         fetch.return_value = {
-            symbol: dict(snapshot, sentiment=82)
+            symbol: dict(snapshot, sentiment=82, source_updated_at=self.now.isoformat())
             for symbol, snapshot in self.snapshots.items()
         }
         result = run_bot_g_observer(self.cfg, self.now)
