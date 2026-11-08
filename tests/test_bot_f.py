@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 import requests
 
-from app.new_launches import _get_json, _market_eligibility, _select_token, _pool_url, _load_seen, _save_seen, release_seen_token
+from app.new_launches import _get_json, _market_eligibility, _select_token, _pool_url, _load_seen, _save_seen, release_seen_token, _holder_count_review_reason
 from app.security import evaluate_launch_security, get_goplus_access_token
 import hashlib
 from app.alerts import format_message
@@ -67,6 +67,13 @@ class BotFScreeningTests(unittest.TestCase):
         stale = dict(self.pool, created_at=(self.now - timedelta(days=3)).isoformat())
         self.assertFalse(_market_eligibility(new, self.cfg, self.now)[0])
         self.assertFalse(_market_eligibility(stale, self.cfg, self.now)[0])
+
+    def test_holder_count_gate_requires_minimum_distribution(self):
+        self.assertIsNone(_holder_count_review_reason({"holder_count": "39"}, 10))
+        low = _holder_count_review_reason({"holder_count": "1"}, 10)
+        self.assertIn("abaixo do mínimo", low)
+        missing = _holder_count_review_reason({}, 10)
+        self.assertIn("não informado", missing)
 
     def test_security_fails_closed_when_required_fields_are_unknown(self):
         result = evaluate_launch_security({})
