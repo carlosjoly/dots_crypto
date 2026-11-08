@@ -1,0 +1,70 @@
+name: Dot Cripto Bot F Discovery
+
+on:
+  # Trigger this workflow from cron-job.org every 5 minutes.
+  # No native schedule is configured, preventing duplicate dispatches.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dot-cripto-bot-f-discovery
+  cancel-in-progress: false
+
+jobs:
+  bot-f:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Restore Bot F deduplication state
+        uses: actions/cache/restore@v4
+        with:
+          path: data/bot_f_seen.json
+          key: bot-f-seen-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            bot-f-seen-${{ runner.os }}-${{ github.ref_name }}-
+      - name: Restore Bot F API telemetry
+        uses: actions/cache/restore@v4
+        with:
+          path: data/bot_f_api_metrics.jsonl
+          key: bot-f-api-metrics-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            bot-f-api-metrics-${{ runner.os }}-${{ github.ref_name }}-
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run Bot F discovery cycle
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GOPLUS_ENABLED: ${{ secrets.GOPLUS_ENABLED }}
+          GOPLUS_APP_KEY: ${{ secrets.GOPLUS_APP_KEY }}
+          GOPLUS_APP_SECRET: ${{ secrets.GOPLUS_APP_SECRET }}
+        run: python -m app.run_bot_f
+      - name: Save Bot F deduplication state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/bot_f_seen.json
+          key: bot-f-seen-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+      - name: Save Bot F API telemetry
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/bot_f_api_metrics.jsonl
+          key: bot-f-api-metrics-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+      - name: Upload Bot F logs and state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dot-cripto-bot-f-${{ github.run_id }}
+          path: data/
+          if-no-files-found: warn
+          retention-days: 14
