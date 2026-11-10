@@ -130,6 +130,21 @@ def evaluate_launch_security(data, max_tax=0.05, require_lp=False):
         if not isinstance(lp_holders, list) or not lp_holders:
             review.append("lp_holders: distribuição e bloqueio de LP não informados")
         else:
+            raw_lp_count = data.get("lp_holder_count")
+            try:
+                lp_count_value = float(raw_lp_count)
+                if (not math.isfinite(lp_count_value) or not lp_count_value.is_integer()
+                        or lp_count_value < len(lp_holders)):
+                    raise ValueError()
+                lp_count = int(lp_count_value)
+            except (TypeError, ValueError, OverflowError):
+                lp_count = None
+                review.append("lp_holder_count: total de holders LP ausente/inválido; cobertura incompleta")
+            if lp_count is not None and lp_count != len(lp_holders):
+                review.append(
+                    f"lp_holders: GoPlus retornou {len(lp_holders)} de {lp_count} holders; "
+                    "concentração total não pode ser confirmada"
+                )
             unprotected_concentration = 0.0
             now_epoch = time.time()
             for index, holder in enumerate(lp_holders):
