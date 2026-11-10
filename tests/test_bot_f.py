@@ -119,7 +119,7 @@ class BotFScreeningTests(unittest.TestCase):
         }
         result = evaluate_launch_security(data, require_lp=True)
         self.assertEqual(result["status"], "rejected")
-        self.assertTrue(any("LP não bloqueada concentra" in flag for flag in result["flags"]))
+        self.assertTrue(any("LP não bloqueada agregada concentra" in flag for flag in result["flags"]))
 
     def test_security_rejects_aggregate_unlocked_lp_concentration_at_50pct(self):
         data = {
