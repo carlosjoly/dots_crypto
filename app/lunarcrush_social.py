@@ -86,7 +86,8 @@ def fetch_social_snapshots(symbols, api_key, session=requests, now=None):
     if collected.tzinfo is None:
         raise ValueError("Collection timestamp must include timezone")
     collected_iso = collected.astimezone(timezone.utc).isoformat()
-    generated = (payload.get("config") or {}).get("generated") if isinstance(payload, dict) else None
+    config = payload.get("config") if isinstance(payload, dict) else None
+    generated = config.get("generated") if isinstance(config, dict) else None
     source_updated_iso = None
     try:
         generated_seconds = float(generated)
