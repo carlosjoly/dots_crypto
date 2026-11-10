@@ -431,7 +431,7 @@ def scan_new_launches(cfg):
                     access_token=access_token,
                 )
                 assessment = evaluate_launch_security(
-                    security, max_tax=float(settings["max_buy_sell_tax"])
+                    security, max_tax=float(settings["max_buy_sell_tax"]), require_lp=True
                 )
                 if assessment["status"] != "rejected":
                     holder_reason = _holder_count_review_reason(
