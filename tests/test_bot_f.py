@@ -121,6 +121,18 @@ class BotFScreeningTests(unittest.TestCase):
         self.assertEqual(result["status"], "rejected")
         self.assertTrue(any("LP não bloqueada agregada concentra" in flag for flag in result["flags"]))
 
+    def test_security_rejects_non_finite_tax_and_lp_percent(self):
+        base = {
+            "is_honeypot": "0", "cannot_buy": "0", "cannot_sell_all": "0",
+            "is_blacklisted": "0", "malicious_address": "0", "is_open_source": "1",
+            "is_in_dex": "1", "buy_tax": "nan", "sell_tax": "0.02",
+            "lp_holders": [{"address": "0xlocker", "percent": "nan", "is_locked": "1"}],
+        }
+        result = evaluate_launch_security(base, require_lp=True)
+        self.assertEqual(result["status"], "review_required")
+        self.assertTrue(any("taxa de compra" in flag for flag in result["flags"]))
+        self.assertTrue(any("concentração percentual" in flag for flag in result["flags"]))
+
     def test_security_rejects_aggregate_unlocked_lp_concentration_at_50pct(self):
         data = {
             "is_honeypot": "0", "cannot_buy": "0", "cannot_sell_all": "0",
