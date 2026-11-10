@@ -92,7 +92,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Run isolated Bot G tests without repository secrets
-        run: python -m pytest tests/test_bot_g.py tests/test_lunarcrush_social.py -q
+        run: >-
+          python -m unittest discover -s tests -p 'test_bot_g.py' -v &&
+          python -m unittest discover -s tests -p 'test_lunarcrush_social.py' -v
       - name: Upload Bot G validation evidence
         if: always()
         uses: actions/upload-artifact@v4
