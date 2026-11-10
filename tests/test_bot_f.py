@@ -98,7 +98,7 @@ class BotFScreeningTests(unittest.TestCase):
             "is_in_dex": "1", "buy_tax": "0.01", "sell_tax": "0.02",
             "lp_holders": [{"address": "0xlocker", "percent": "0.95", "is_locked": "1"}],
         }
-        self.assertEqual(evaluate_launch_security(data)["status"], "eligible_for_watchlist")
+        self.assertEqual(evaluate_launch_security(data, require_lp=True)["status"], "eligible_for_watchlist")
 
     def test_security_requires_lp_holder_data_before_watchlist_approval(self):
         data = {
@@ -106,7 +106,7 @@ class BotFScreeningTests(unittest.TestCase):
             "is_blacklisted": "0", "malicious_address": "0", "is_open_source": "1",
             "is_in_dex": "1", "buy_tax": "0.01", "sell_tax": "0.02",
         }
-        result = evaluate_launch_security(data)
+        result = evaluate_launch_security(data, require_lp=True)
         self.assertEqual(result["status"], "review_required")
         self.assertTrue(any("lp_holders" in flag for flag in result["flags"]))
 
@@ -117,7 +117,7 @@ class BotFScreeningTests(unittest.TestCase):
             "is_in_dex": "1", "buy_tax": "0.01", "sell_tax": "0.02",
             "lp_holders": [{"address": "0xowner", "percent": "0.50", "is_locked": "0"}],
         }
-        result = evaluate_launch_security(data)
+        result = evaluate_launch_security(data, require_lp=True)
         self.assertEqual(result["status"], "rejected")
         self.assertTrue(any("LP não bloqueada concentra" in flag for flag in result["flags"]))
 
