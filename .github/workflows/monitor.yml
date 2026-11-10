@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: dot-cripto-monitor
@@ -91,16 +91,8 @@ jobs:
             bot-g-social-${{ runner.os }}-
       - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Run Bot G only and verify Telegram delivery
-        env:
-          LUNARCRUSH_API_KEY: ${{ secrets.LUNARCRUSH_API_KEY }}
-          SOCIAL_API_KEY: ${{ secrets.SOCIAL_API_KEY }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          GOPLUS_ENABLED: ${{ secrets.GOPLUS_ENABLED }}
-          GOPLUS_APP_KEY: ${{ secrets.GOPLUS_APP_KEY }}
-          GOPLUS_APP_SECRET: ${{ secrets.GOPLUS_APP_SECRET }}
-        run: python -m app.validate_bot_g
+      - name: Run isolated Bot G tests without repository secrets
+        run: python -m pytest tests/test_bot_g.py tests/test_lunarcrush_social.py -q
       - name: Upload Bot G validation evidence
         if: always()
         uses: actions/upload-artifact@v4
