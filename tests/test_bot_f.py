@@ -128,7 +128,7 @@ class BotFScreeningTests(unittest.TestCase):
             "is_in_dex": "1", "buy_tax": "0.01", "sell_tax": "0.02",
             "lp_holders": [{"address": "0xlocker", "percent": "1.0", "is_locked": "1"}],
         }
-        self.assertEqual(evaluate_launch_security(data)["status"], "eligible_for_watchlist")
+        self.assertEqual(evaluate_launch_security(data, require_lp=True)["status"], "eligible_for_watchlist")
 
     def test_bot_f_alert_layout_includes_contract_and_pool_without_fake_technical_levels(self):
         alert = {
