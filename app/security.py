@@ -129,6 +129,7 @@ def evaluate_launch_security(data, max_tax=0.05, require_lp=False):
         if not isinstance(lp_holders, list) or not lp_holders:
             review.append("lp_holders: distribuição e bloqueio de LP não informados")
         else:
+            unlocked_concentration = 0.0
             for index, holder in enumerate(lp_holders):
                 if not isinstance(holder, dict):
                     review.append(f"lp_holders[{index}]: registro inválido")
@@ -145,16 +146,17 @@ def evaluate_launch_security(data, max_tax=0.05, require_lp=False):
                 if locked == "1":
                     continue
                 if locked == "0":
-                    if percent >= 0.50:
-                        blockers.append(
-                            f"LP não bloqueada concentra {percent:.1%} (limite crítico 50%)"
-                        )
-                    else:
-                        review.append(
-                            f"LP não bloqueada: concentração {percent:.1%}; revisão manual obrigatória"
-                        )
+                    unlocked_concentration += percent
                 else:
                     review.append(f"lp_holders[{index}]: estado de bloqueio não confirmado")
+            if unlocked_concentration >= 0.50:
+                blockers.append(
+                    f"LP não bloqueada agregada concentra {unlocked_concentration:.1%} (limite crítico 50%)"
+                )
+            elif unlocked_concentration > 0:
+                review.append(
+                    f"LP não bloqueada agregada: concentração {unlocked_concentration:.1%}; revisão manual obrigatória"
+                )
 
     if blockers:
         status = "rejected"
