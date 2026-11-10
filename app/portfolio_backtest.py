@@ -317,9 +317,15 @@ def failed_spot_long_test_rows(summaries):
         and row["market_mode"] == "spot_long"
         and row["agent"] in SPOT_LONG_GATE_AGENTS
     ]
+    min_bot_a_test_trades = 30
     return [
         row for row in rows
-        if int(row["trades"]) == 0 or float(row["total_return_pct"]) <= 0
+        if int(row["trades"]) == 0
+        or float(row["total_return_pct"]) <= 0
+        or (
+            row["agent"] == "Bot A — Altas expressivas"
+            and int(row["trades"]) < min_bot_a_test_trades
+        )
     ]
 
 
@@ -459,6 +465,7 @@ def run(days=180, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
         "test_gate": {
             "required": require_positive_test,
             "scope": "spot_long only; Bots A, C, D and E. Bot B remains a downside/risk alert, not a Spot-long candidate.",
+            "bot_a_minimum_test_trades": 30,
             "passed": gate_passed,
             "evaluated_combinations": len(test_rows),
             "failed": [
