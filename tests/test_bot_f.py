@@ -304,6 +304,51 @@ class BotFScreeningTests(unittest.TestCase):
             self.assertEqual(goplus.call_count, 1)
 
 
+    @patch("app.new_launches.time.sleep")
+    @patch("app.new_launches.goplus_token_security")
+    @patch("app.new_launches.fetch_new_pools")
+    def test_rejected_honeypot_and_unlocked_lp_never_generate_alert(self, fetch_pools, goplus, _sleep):
+        with tempfile.TemporaryDirectory() as directory:
+            now = datetime.now(timezone.utc)
+            address = "0x" + "2" * 40
+            pool = {
+                "pool_id": "eth_0x" + "f" * 40, "pool_address": "0x" + "f" * 40,
+                "created_at": (now - timedelta(minutes=30)).isoformat(),
+                "liquidity_usd": "52141.89", "volume_24h_usd": "33290.40",
+                "txns_24h": {"buys": 30, "sells": 22},
+                "base": {"symbol": "POOF", "name": "Poof", "address": address},
+                "quote": {"symbol": "USDC", "address": "0x" + "1" * 40},
+                "base_price_usd": "0.00048", "quote_price_usd": "1",
+                "dex": "Uniswap V2", "network": "eth",
+            }
+            fetch_pools.return_value = [pool]
+            goplus.return_value = {
+                "is_honeypot": "1", "cannot_buy": "0", "cannot_sell_all": "0",
+                "is_blacklisted": "0", "malicious_address": "0", "is_open_source": "1",
+                "is_in_dex": "1", "buy_tax": "0.01", "sell_tax": "0.01",
+                "holder_count": "1", "lp_holder_count": "2",
+                "lp_holders": [
+                    {"address": "0xowner", "percent": "1.0", "is_locked": "0"},
+                    {"address": "0xlocker", "percent": "0.0", "is_locked": "1"},
+                ],
+            }
+            cfg = {
+                "_root": directory, "_env": {"goplus_enabled": True},
+                "launches": {
+                    "networks": ["eth"], "quote_symbols": ["USDC"],
+                    "min_pool_age_minutes": 5, "max_pool_age_hours": 48,
+                    "min_liquidity_usd": 25000, "min_volume_24h_usd": 10000,
+                    "min_txns_24h": 50, "min_holder_count": 10,
+                    "max_security_checks_per_cycle": 15, "max_buy_sell_tax": 0.05,
+                    "seen_state_file": "data/seen.json",
+                    "review_state_file": "data/review.json",
+                    "review_recheck_minutes": 30,
+                },
+            }
+            alerts = scan_new_launches(cfg)
+            self.assertEqual(alerts, [])
+            self.assertEqual(goplus.call_count, 1)
+
     @patch("app.security.time.time", return_value=1700000000)
     @patch("app.security.requests.post")
     def test_goplus_auth_uses_official_signed_access_token_flow(self, mock_post, _mock_time):
