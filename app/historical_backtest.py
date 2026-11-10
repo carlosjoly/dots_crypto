@@ -187,7 +187,7 @@ def summarize_events(records):
     return summary
 
 
-def run(days=365, fee_per_side_pct=0.10, slippage_per_side_pct=0.05):
+def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05):
     cfg = load_config()
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=int(days))
@@ -255,12 +255,12 @@ def run(days=365, fee_per_side_pct=0.10, slippage_per_side_pct=0.05):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--days", type=int, default=365)
+    parser.add_argument("--days", type=int, default=1460)
     parser.add_argument("--fee-per-side-pct", type=float, default=0.10)
     parser.add_argument("--slippage-per-side-pct", type=float, default=0.05)
     args = parser.parse_args()
-    if args.days < 60 or args.days > 365:
-        parser.error("--days must be between 60 and 365")
+    if args.days < 60 or args.days > 1460:
+        parser.error("--days must be between 60 and 1460")
     if args.fee_per_side_pct < 0 or args.slippage_per_side_pct < 0:
         parser.error("cost assumptions cannot be negative")
     raise SystemExit(run(args.days, args.fee_per_side_pct, args.slippage_per_side_pct))

@@ -38,14 +38,44 @@ def _rows(payload):
     raise ValueError("LunarCrush response has no data list")
 
 
-def fetch_social_snapshots(symbols, api_key, session=requests, now=None):
-    """Fetch one bulk response and normalize verified social fields.
+def _generated_timestamp(payload):
+    """Return the provider's documented config.generated timestamp, if valid."""
+    config = payload.get("config") if isinstance(payload, dict) else None
+    generated = config.get("generated") if isinstance(config, dict) else None
+    try:
+        seconds = float(generated)
+        if not math.isfinite(seconds) or seconds <= 0:
+            return None
+        return datetime.fromtimestamp(seconds, tz=timezone.utc).isoformat()
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
 
-    `symbols` are exchange-style symbols such as BTCUSDT, ETHUSDT, LINKUSDT.
-    Collection time is recorded separately from provider source freshness.
-    v2 is used because LunarCrush documents v1 as heavily cached (up to one
-    hour) and v2 as updated every few seconds. The config.generated Unix time
-    is the provider generation timestamp for the returned metrics.
+
+def _fallback_coin_generated(symbol, api_key, session):
+    """Use the documented per-coin v1 snapshot only when bulk metadata omits generated.
+
+    This is a bounded fallback (one request per monitored asset, at most hourly).
+    It never substitutes local collection time or a price-only row timestamp.
+    """
+    try:
+        response = session.get(
+            f"https://lunarcrush.com/api4/public/coins/{symbol}/v1",
+            headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
+            timeout=20,
+        )
+        if response.status_code != 200:
+            return None
+        return _generated_timestamp(response.json())
+    except (requests.RequestException, ValueError, TypeError):
+        return None
+
+
+def fetch_social_snapshots(symbols, api_key, session=requests, now=None):
+    """Fetch bulk social metrics and verify freshness from provider generation metadata.
+
+    The v2 bulk endpoint is preferred. If it omits the documented config.generated
+    timestamp, use a bounded per-coin v1 metadata fallback. Collection time and
+    last-updated price time are never treated as social-source freshness.
     """
     key = str(api_key or "").strip()
     if not key:
@@ -86,19 +116,7 @@ def fetch_social_snapshots(symbols, api_key, session=requests, now=None):
     if collected.tzinfo is None:
         raise ValueError("Collection timestamp must include timezone")
     collected_iso = collected.astimezone(timezone.utc).isoformat()
-    config = payload.get("config") if isinstance(payload, dict) else None
-    generated = config.get("generated") if isinstance(config, dict) else None
-    source_updated_iso = None
-    try:
-        generated_seconds = float(generated)
-        if not math.isfinite(generated_seconds) or generated_seconds <= 0:
-            raise ValueError()
-        source_updated_iso = datetime.fromtimestamp(
-            generated_seconds, tz=timezone.utc
-        ).isoformat()
-    except (TypeError, ValueError, OverflowError, OSError):
-        # Never substitute local collection time or a price-only timestamp.
-        source_updated_iso = None
+    source_updated_iso = _generated_timestamp(payload)
 
     output = {}
     for row in _rows(payload):
@@ -126,5 +144,14 @@ def fetch_social_snapshots(symbols, api_key, session=requests, now=None):
             # This is a price timestamp, not a social-metric timestamp.
             "price_updated_at": row.get("last_updated_price"),
         }
+
+    # The bulk list response sometimes omits config.generated. Resolve freshness
+    # from the provider's documented per-coin snapshot endpoint, never from local
+    # collection time or last_updated_price.
+    if source_updated_iso is None:
+        for output_symbol, snapshot in output.items():
+            coin = output_symbol.removesuffix("USDT")
+            snapshot["source_updated_at"] = _fallback_coin_generated(coin, key, session)
+            snapshot["source_freshness_verified"] = snapshot["source_updated_at"] is not None
 
     return output

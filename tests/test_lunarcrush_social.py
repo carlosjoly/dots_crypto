@@ -14,7 +14,7 @@ class LunarCrushFreeAdapterTests(unittest.TestCase):
         self.session = Mock()
         self.response = Mock(status_code=200)
         self.response.json.return_value = {
-            "config": {},
+            "config": {"generated": int(self.now.timestamp())},
             "data": [
                 {
                     "symbol": "BTC",
@@ -41,6 +41,14 @@ class LunarCrushFreeAdapterTests(unittest.TestCase):
         self.assertEqual(result["LINKUSDT"]["sentiment"], 81)
 
     def test_does_not_invent_freshness_or_bot_metrics(self):
+        self.response.json.return_value = {
+            "config": {},
+            "data": [{"symbol": "BTC", "social_volume_24h": 145953, "sentiment": 73,
+                      "last_updated_price": 1790000000}],
+        }
+        fallback = Mock(status_code=200)
+        fallback.json.return_value = {"config": {}, "data": {}}
+        self.session.get.side_effect = [self.response, fallback]
         result = fetch_social_snapshots(
             ["BTCUSDT"], "test-secret", session=self.session, now=self.now,
         )["BTCUSDT"]
@@ -50,6 +58,22 @@ class LunarCrushFreeAdapterTests(unittest.TestCase):
         self.assertIsNone(result["spam"])
         self.assertIsNone(result["bot_ratio_pct"])
         self.assertEqual(result["price_updated_at"], 1790000000)
+        self.assertEqual(self.session.get.call_count, 2)
+
+    def test_uses_per_coin_generated_timestamp_when_bulk_metadata_is_missing(self):
+        self.response.json.return_value = {
+            "config": {},
+            "data": [{"symbol": "BTC", "social_volume_24h": 145953, "sentiment": 73}],
+        }
+        fallback = Mock(status_code=200)
+        fallback.json.return_value = {"config": {"generated": int(self.now.timestamp())}, "data": {}}
+        self.session.get.side_effect = [self.response, fallback]
+        result = fetch_social_snapshots(
+            ["BTCUSDT"], "test-secret", session=self.session, now=self.now,
+        )["BTCUSDT"]
+        self.assertEqual(result["source_updated_at"], self.now.isoformat())
+        self.assertTrue(result["source_freshness_verified"])
+        self.assertIn("/coins/BTC/v1", self.session.get.call_args_list[1].args[0])
 
     def test_uses_provider_generated_timestamp_when_available(self):
         self.response.json.return_value["config"]["generated"] = int(self.now.timestamp())
