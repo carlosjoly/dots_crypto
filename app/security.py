@@ -122,6 +122,39 @@ def evaluate_launch_security(data, max_tax=0.05):
             else:
                 review.append(label)
 
+    # LP concentration/lock is an independent hard gate. Pool TVL alone does
+    # not prove that liquidity is locked or resistant to a rug pull.
+    lp_holders = data.get("lp_holders")
+    if not isinstance(lp_holders, list) or not lp_holders:
+        review.append("lp_holders: distribuição e bloqueio de LP não informados")
+    else:
+        for index, holder in enumerate(lp_holders):
+            if not isinstance(holder, dict):
+                review.append(f"lp_holders[{index}]: registro inválido")
+                continue
+            raw_percent = holder.get("percent")
+            try:
+                percent = float(raw_percent)
+                if percent < 0 or percent > 1:
+                    raise ValueError()
+            except (TypeError, ValueError, OverflowError):
+                review.append(f"lp_holders[{index}]: concentração percentual ausente/inválida")
+                continue
+            locked = str(holder.get("is_locked", "")).strip()
+            if locked == "1":
+                continue
+            if locked == "0":
+                if percent >= 0.50:
+                    blockers.append(
+                        f"LP não bloqueada concentra {percent:.1%} (limite crítico 50%)"
+                    )
+                else:
+                    review.append(
+                        f"LP não bloqueada: concentração {percent:.1%}; revisão manual obrigatória"
+                    )
+            else:
+                review.append(f"lp_holders[{index}]: estado de bloqueio não confirmado")
+
     if blockers:
         status = "rejected"
         flags = blockers + review
