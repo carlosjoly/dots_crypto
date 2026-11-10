@@ -187,7 +187,7 @@ def summarize_events(records):
     return summary
 
 
-def run(days=365, fee_per_side_pct=0.10, slippage_per_side_pct=0.05):
+def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05):
     cfg = load_config()
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=int(days))
