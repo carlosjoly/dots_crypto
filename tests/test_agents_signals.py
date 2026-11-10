@@ -101,6 +101,16 @@ class ActiveAgentSignalTests(unittest.TestCase):
         data.loc[54, "close"] = 89.0
         self.assertIn("Bot D — Rompimentos", self.agents(data))
 
+    def test_bot_d_rejects_shallow_breakout_without_atr_clearance(self):
+        data = frame(change_pct=0.2, rel_volume=2.0, rsi14=60.0)
+        data.loc[54, "close"] = 110.1
+        self.assertNotIn("Bot D — Rompimentos", self.agents(data))
+
+    def test_bot_d_rejects_breakout_with_exhausted_rsi(self):
+        data = frame(change_pct=0.2, rel_volume=2.0, rsi14=80.0)
+        data.loc[54, "close"] = 112.0
+        self.assertNotIn("Bot D — Rompimentos", self.agents(data))
+
     def test_bot_d_does_not_trigger_without_relative_volume_confirmation(self):
         data = frame(change_pct=0.2, rel_volume=1.79, rsi14=75.0)
         data.loc[54, "close"] = 111.0
