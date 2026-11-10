@@ -1,4 +1,5 @@
 import hashlib
+import math
 import time
 
 import requests
@@ -94,7 +95,7 @@ def evaluate_launch_security(data, max_tax=0.05, require_lp=False):
         raw = data.get(field)
         try:
             tax = float(raw)
-            if tax < 0 or tax > 1:
+            if not math.isfinite(tax) or tax < 0 or tax > 1:
                 raise ValueError()
             if tax >= max_tax:
                 blockers.append(f"{label} igual ou superior a {max_tax:.0%}")
@@ -137,7 +138,7 @@ def evaluate_launch_security(data, max_tax=0.05, require_lp=False):
                 raw_percent = holder.get("percent")
                 try:
                     percent = float(raw_percent)
-                    if percent < 0 or percent > 1:
+                    if not math.isfinite(percent) or percent < 0 or percent > 1:
                         raise ValueError()
                 except (TypeError, ValueError, OverflowError):
                     review.append(f"lp_holders[{index}]: concentração percentual ausente/inválida")
