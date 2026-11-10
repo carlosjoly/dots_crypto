@@ -187,7 +187,7 @@ def summarize_events(records):
     return summary
 
 
-def run(days=180, fee_per_side_pct=0.10, slippage_per_side_pct=0.05):
+def run(days=365, fee_per_side_pct=0.10, slippage_per_side_pct=0.05):
     cfg = load_config()
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=int(days))
@@ -255,7 +255,7 @@ def run(days=180, fee_per_side_pct=0.10, slippage_per_side_pct=0.05):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--days", type=int, default=180)
+    parser.add_argument("--days", type=int, default=365)
     parser.add_argument("--fee-per-side-pct", type=float, default=0.10)
     parser.add_argument("--slippage-per-side-pct", type=float, default=0.05)
     args = parser.parse_args()

@@ -13,6 +13,11 @@ thresholds:
   move_4h_pct: 6.0
   relative_volume: 1.8
   breakout_lookback: 20
+  breakout_buffer_atr: 0.10
+  breakout_rsi_long_min: 50
+  breakout_rsi_long_max: 75
+  breakout_rsi_short_min: 25
+  breakout_rsi_short_max: 50
   rsi_oversold: 30
   rsi_overbought: 70
   atr_stop_multiple: 1.5

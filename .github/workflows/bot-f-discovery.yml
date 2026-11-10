@@ -1,12 +1,12 @@
 name: Dot Cripto Bot F Discovery
 
 on:
-  # Trigger this workflow from cron-job.org every 5 minutes.
+  # Trigger this workflow from cron-job.org every 15 minutes.
   # No native schedule is configured, preventing duplicate dispatches.
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: dot-cripto-bot-f-discovery
@@ -14,6 +14,7 @@ concurrency:
 
 jobs:
   bot-f:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:

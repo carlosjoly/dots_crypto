@@ -317,13 +317,19 @@ def failed_spot_long_test_rows(summaries):
         and row["market_mode"] == "spot_long"
         and row["agent"] in SPOT_LONG_GATE_AGENTS
     ]
+    min_bot_a_test_trades = 30
     return [
         row for row in rows
-        if int(row["trades"]) == 0 or float(row["total_return_pct"]) <= 0
+        if int(row["trades"]) == 0
+        or float(row["total_return_pct"]) <= 0
+        or (
+            row["agent"] == "Bot A — Altas expressivas"
+            and int(row["trades"]) < min_bot_a_test_trades
+        )
     ]
 
 
-def run(days=180, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
+def run(days=365, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
         initial_cash=10000.0, risk_fraction=0.01, max_exposure_fraction=0.80,
         max_positions=5, stop_atr_multiple=1.5, reward_risk=1.5,
         require_positive_test=True):
@@ -459,6 +465,7 @@ def run(days=180, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
         "test_gate": {
             "required": require_positive_test,
             "scope": "spot_long only; Bots A, C, D and E. Bot B remains a downside/risk alert, not a Spot-long candidate.",
+            "bot_a_minimum_test_trades": 30,
             "passed": gate_passed,
             "evaluated_combinations": len(test_rows),
             "failed": [
@@ -482,7 +489,7 @@ def run(days=180, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Backtest de carteira com posições simultâneas.")
-    parser.add_argument("--days", type=int, default=180)
+    parser.add_argument("--days", type=int, default=365)
     parser.add_argument("--fee-per-side-pct", type=float, default=0.10)
     parser.add_argument("--slippage-per-side-pct", type=float, default=0.05)
     parser.add_argument("--initial-cash", type=float, default=10000.0)

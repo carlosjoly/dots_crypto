@@ -8,7 +8,7 @@ import math
 
 import requests
 
-LUNARCRUSH_COINS_URL = "https://lunarcrush.com/api4/public/coins/list/v1"
+LUNARCRUSH_COINS_URL = "https://lunarcrush.com/api4/public/coins/list/v2"
 
 
 class LunarCrushAccessError(RuntimeError):
@@ -43,8 +43,9 @@ def fetch_social_snapshots(symbols, api_key, session=requests, now=None):
 
     `symbols` are exchange-style symbols such as BTCUSDT, ETHUSDT, LINKUSDT.
     Collection time is recorded separately from provider source freshness.
-    The endpoint response observed in the free-tier probe did not expose a
-    social-metric update timestamp, so source freshness remains unverified.
+    v2 is used because LunarCrush documents v1 as heavily cached (up to one
+    hour) and v2 as updated every few seconds. The config.generated Unix time
+    is the provider generation timestamp for the returned metrics.
     """
     key = str(api_key or "").strip()
     if not key:
@@ -85,6 +86,19 @@ def fetch_social_snapshots(symbols, api_key, session=requests, now=None):
     if collected.tzinfo is None:
         raise ValueError("Collection timestamp must include timezone")
     collected_iso = collected.astimezone(timezone.utc).isoformat()
+    config = payload.get("config") if isinstance(payload, dict) else None
+    generated = config.get("generated") if isinstance(config, dict) else None
+    source_updated_iso = None
+    try:
+        generated_seconds = float(generated)
+        if not math.isfinite(generated_seconds) or generated_seconds <= 0:
+            raise ValueError()
+        source_updated_iso = datetime.fromtimestamp(
+            generated_seconds, tz=timezone.utc
+        ).isoformat()
+    except (TypeError, ValueError, OverflowError, OSError):
+        # Never substitute local collection time or a price-only timestamp.
+        source_updated_iso = None
 
     output = {}
     for row in _rows(payload):
@@ -104,8 +118,8 @@ def fetch_social_snapshots(symbols, api_key, session=requests, now=None):
             "social_volume_24h": int(volume) if volume.is_integer() else volume,
             "sentiment": sentiment,
             "collected_at": collected_iso,
-            "source_updated_at": None,
-            "source_freshness_verified": False,
+            "source_updated_at": source_updated_iso,
+            "source_freshness_verified": source_updated_iso is not None,
             "social_contributors": None,
             "spam": None,
             "bot_ratio_pct": None,

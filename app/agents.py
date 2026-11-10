@@ -57,12 +57,23 @@ def run_market_agents_enriched(symbol, tf, d, cfg):
         and r["close"] < prior["low"].min()
         and prev["close"] >= prior_before["low"].min()
     )
-    if crossed_resistance and rv >= t["relative_volume"]:
+    breakout_buffer = float(t.get("breakout_buffer_atr", 0.10)) * float(r["atr14"])
+    breakout_rsi_long = (
+        float(t.get("breakout_rsi_long_min", 50))
+        <= float(r["rsi14"]) <= float(t.get("breakout_rsi_long_max", 75))
+    )
+    breakout_rsi_short = (
+        float(t.get("breakout_rsi_short_min", 25))
+        <= float(r["rsi14"]) <= float(t.get("breakout_rsi_short_max", 50))
+    )
+    if (crossed_resistance and rv >= t["relative_volume"] and breakout_rsi_long
+            and float(r["close"]) > float(prior["high"].max()) + breakout_buffer):
         out.append(_alert("Bot D — Rompimentos", symbol, tf, r, "possível rompimento de resistência",
-                          f"Fecho cruzou acima da máxima das {lookback} velas anteriores com volume relativo {rv:.2f}x; confirmar risco de falso rompimento."))
-    if crossed_support and rv >= t["relative_volume"]:
+                          f"Fecho ultrapassou a máxima das {lookback} velas por mais de {breakout_buffer:.8g} (0,10 ATR), com volume relativo {rv:.2f}x e RSI={r['rsi14']:.1f}; confirmar risco de falso rompimento."))
+    if (crossed_support and rv >= t["relative_volume"] and breakout_rsi_short
+            and float(r["close"]) < float(prior["low"].min()) - breakout_buffer):
         out.append(_alert("Bot D — Rompimentos", symbol, tf, r, "possível rompimento de suporte",
-                          f"Fecho cruzou abaixo da mínima das {lookback} velas anteriores com volume relativo {rv:.2f}x; confirmar risco de falso rompimento."))
+                          f"Fecho rompeu a mínima das {lookback} velas por mais de {breakout_buffer:.8g} (0,10 ATR), com volume relativo {rv:.2f}x e RSI={r['rsi14']:.1f}; confirmar risco de falso rompimento."))
     trend_up = r["close"] > r["sma20"] > r["sma50"]
     trend_down = r["close"] < r["sma20"] < r["sma50"]
     previous_trend_up = prev["close"] > prev["sma20"] > prev["sma50"]
@@ -115,10 +126,14 @@ def run_market_agents_enriched(symbol, tf, d, cfg):
     else:
         # Preserve the previous edge-triggered swing rules on 1h/4h so the
         # experiment isolates the requested 15m change.
-        swing_long = trend_up and 40 <= r["rsi14"] <= 68 and rv >= 1.0
-        previous_swing_long = previous_trend_up and 40 <= prev["rsi14"] <= 68 and prev["rel_volume"] >= 1.0
-        swing_short = trend_down and 32 <= r["rsi14"] <= 60 and rv >= 1.0
-        previous_swing_short = previous_trend_down and 32 <= prev["rsi14"] <= 60 and prev["rel_volume"] >= 1.0
+        # On 1h/4h require stronger trend quality, a narrower RSI band and
+        # materially above-average activity. The transition rule prevents
+        # repeated alerts while the setup remains active.
+        min_swing_volume = float(t.get("swing_pullback_relative_volume", 1.2))
+        swing_long = trend_up and 45 <= r["rsi14"] <= 65 and rv >= min_swing_volume
+        previous_swing_long = previous_trend_up and 45 <= prev["rsi14"] <= 65 and prev["rel_volume"] >= min_swing_volume
+        swing_short = trend_down and 35 <= r["rsi14"] <= 55 and rv >= min_swing_volume
+        previous_swing_short = previous_trend_down and 35 <= prev["rsi14"] <= 55 and prev["rel_volume"] >= min_swing_volume
         if swing_long and not previous_swing_long:
             stop = float(r["close"] - t["atr_stop_multiple"] * r["atr14"])
             target = float(r["close"] + min_risk_reward * (r["close"] - stop))

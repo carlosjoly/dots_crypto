@@ -51,6 +51,15 @@ class LunarCrushFreeAdapterTests(unittest.TestCase):
         self.assertIsNone(result["bot_ratio_pct"])
         self.assertEqual(result["price_updated_at"], 1790000000)
 
+    def test_uses_provider_generated_timestamp_when_available(self):
+        self.response.json.return_value["config"]["generated"] = int(self.now.timestamp())
+        result = fetch_social_snapshots(
+            ["BTCUSDT"], "test-secret", session=self.session, now=self.now,
+        )["BTCUSDT"]
+        self.assertEqual(result["source_updated_at"], self.now.isoformat())
+        self.assertTrue(result["source_freshness_verified"])
+        self.assertIn("/coins/list/v2", self.session.get.call_args.args[0])
+
     def test_missing_key_is_blocked(self):
         with self.assertRaises(LunarCrushAccessError):
             fetch_social_snapshots(["BTCUSDT"], "", session=self.session)

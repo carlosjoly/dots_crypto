@@ -1,4 +1,5 @@
 import hashlib
+import math
 import time
 
 import requests
@@ -59,7 +60,7 @@ def goplus_token_security(chain_id, token_address, app_key="", app_secret="", ac
     return token
 
 
-def evaluate_launch_security(data, max_tax=0.05):
+def evaluate_launch_security(data, max_tax=0.05, require_lp=False):
     """Fail-closed screening: unknown required fields never become a clean bill of health."""
     if not isinstance(data, dict) or not data:
         return {"status": "review_required", "flags": ["Resposta GoPlus ausente"], "notes": []}
@@ -94,7 +95,7 @@ def evaluate_launch_security(data, max_tax=0.05):
         raw = data.get(field)
         try:
             tax = float(raw)
-            if tax < 0 or tax > 1:
+            if not math.isfinite(tax) or tax < 0 or tax > 1:
                 raise ValueError()
             if tax >= max_tax:
                 blockers.append(f"{label} igual ou superior a {max_tax:.0%}")
@@ -121,6 +122,100 @@ def evaluate_launch_security(data, max_tax=0.05):
                 blockers.append(label)
             else:
                 review.append(label)
+
+    if require_lp:
+        # GoPlus returns only the top LP holders. Unknown, partial or expired
+        # lock data cannot be treated as protected liquidity.
+        lp_holders = data.get("lp_holders")
+        if not isinstance(lp_holders, list) or not lp_holders:
+            review.append("lp_holders: distribuição e bloqueio de LP não informados")
+        else:
+            raw_lp_count = data.get("lp_holder_count")
+            try:
+                lp_count_value = float(raw_lp_count)
+                if (not math.isfinite(lp_count_value) or not lp_count_value.is_integer()
+                        or lp_count_value < len(lp_holders)):
+                    raise ValueError()
+                lp_count = int(lp_count_value)
+            except (TypeError, ValueError, OverflowError):
+                lp_count = None
+                review.append("lp_holder_count: total de holders LP ausente/inválido; cobertura incompleta")
+            if lp_count is not None and lp_count != len(lp_holders):
+                review.append(
+                    f"lp_holders: GoPlus retornou {len(lp_holders)} de {lp_count} holders; "
+                    "concentração total não pode ser confirmada"
+                )
+            unprotected_concentration = 0.0
+            now_epoch = time.time()
+            for index, holder in enumerate(lp_holders):
+                if not isinstance(holder, dict):
+                    review.append(f"lp_holders[{index}]: registro inválido")
+                    continue
+                try:
+                    percent = float(holder.get("percent"))
+                    if not math.isfinite(percent) or percent < 0 or percent > 1:
+                        raise ValueError()
+                except (TypeError, ValueError, OverflowError):
+                    review.append(f"lp_holders[{index}]: concentração percentual ausente/inválida")
+                    continue
+
+                locked = str(holder.get("is_locked", "")).strip()
+                if locked == "0":
+                    unprotected_concentration += percent
+                    continue
+                if locked != "1":
+                    review.append(f"lp_holders[{index}]: estado de bloqueio não confirmado")
+                    unprotected_concentration += percent
+                    continue
+
+                details = holder.get("locked_detail")
+                try:
+                    balance = float(holder.get("balance"))
+                    if not math.isfinite(balance) or balance <= 0:
+                        raise ValueError()
+                except (TypeError, ValueError, OverflowError):
+                    review.append(f"lp_holders[{index}]: saldo LP ausente/inválido; bloqueio não quantificável")
+                    unprotected_concentration += percent
+                    continue
+                if not isinstance(details, list) or not details:
+                    review.append(f"lp_holders[{index}]: detalhes/validade do bloqueio não informados")
+                    unprotected_concentration += percent
+                    continue
+
+                future_locked_amount = 0.0
+                invalid_lock_detail = False
+                for detail in details:
+                    if not isinstance(detail, dict):
+                        invalid_lock_detail = True
+                        continue
+                    try:
+                        amount = float(detail.get("amount"))
+                        end_time = float(detail.get("end_time"))
+                        if (not math.isfinite(amount) or amount < 0
+                                or not math.isfinite(end_time) or end_time <= 0):
+                            raise ValueError()
+                    except (TypeError, ValueError, OverflowError):
+                        invalid_lock_detail = True
+                        continue
+                    if end_time > now_epoch:
+                        future_locked_amount += amount
+                if invalid_lock_detail:
+                    review.append(f"lp_holders[{index}]: detalhe de bloqueio inválido")
+                locked_fraction = min(1.0, future_locked_amount / balance)
+                if locked_fraction <= 0:
+                    review.append(f"lp_holders[{index}]: bloqueio expirado ou sem prazo futuro verificável")
+                elif locked_fraction < 0.999:
+                    review.append(f"lp_holders[{index}]: bloqueio parcial ({locked_fraction:.1%} do saldo LP)")
+                unprotected_concentration += percent * (1.0 - locked_fraction)
+
+            if unprotected_concentration >= 0.50:
+                blockers.append(
+                    f"LP não protegida agregada concentra {unprotected_concentration:.1%} (limite crítico 50%)"
+                )
+            elif unprotected_concentration > 0:
+                review.append(
+                    f"LP não protegida agregada: concentração {unprotected_concentration:.1%}; revisão manual obrigatória"
+                )
 
     if blockers:
         status = "rejected"
