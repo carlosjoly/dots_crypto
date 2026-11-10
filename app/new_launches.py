@@ -377,7 +377,13 @@ def scan_new_launches(cfg):
     if env.get("goplus_app_key") and env.get("goplus_app_secret"):
         access_token = get_goplus_access_token(env["goplus_app_key"], env["goplus_app_secret"])
 
+    max_security_checks = max(0, int(settings["max_security_checks_per_cycle"]))
+    limit_reached = False
     for network in settings["networks"]:
+        if examined >= max_security_checks:
+            limit_reached = True
+            log.warning("Bot F: limite de verificações GoPlus por ciclo atingido; redes restantes ignoradas.")
+            break
         network_slug = gecko_network_id(network)
         network_summary[network] = {"gecko_slug": network_slug, "pools": 0, "market_eligible": 0,
                                     "security_checked": 0, "approved": 0, "status": "started"}
@@ -411,11 +417,12 @@ def scan_new_launches(cfg):
             if not eligible:
                 continue
             network_summary[network]["market_eligible"] += 1
-            examined += 1
-            checked_this_cycle.add(identity)
-            if examined > int(settings["max_security_checks_per_cycle"]):
+            if examined >= max_security_checks:
+                limit_reached = True
                 log.warning("Bot F: limite de verificações GoPlus por ciclo atingido.")
                 break
+            examined += 1
+            checked_this_cycle.add(identity)
             network_summary[network]["security_checked"] += 1
             try:
                 security = goplus_token_security(
@@ -493,6 +500,8 @@ def scan_new_launches(cfg):
                 "goplus_flags": assessment["flags"],
                 "market_filter": market_reason,
             })
+        if limit_reached or examined >= max_security_checks:
+            break
     _save_seen(state_path, seen)
     _save_review_state(review_state_path, review_state)
     for network, stats in network_summary.items():
