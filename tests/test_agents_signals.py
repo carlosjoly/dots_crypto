@@ -107,7 +107,7 @@ class ActiveAgentSignalTests(unittest.TestCase):
         self.assertNotIn("Bot D — Rompimentos", self.agents(data))
 
     def test_bot_e_uptrend_emits_stop_and_target_from_atr(self):
-        data = frame(sma20=99.0, sma50=98.0, rsi14=50.0, rel_volume=1.0, atr14=2.0)
+        data = frame(sma20=99.0, sma50=98.0, rsi14=50.0, rel_volume=1.2, atr14=2.0)
         alerts = run_market_agents_enriched("BTCUSDT", "4h", data, CFG)
         alert = next(x for x in alerts if x["agent"] == "Bot E — Swing trade")
         self.assertIn("Invalidação indicativa: 97", alert["reason"])
@@ -118,7 +118,7 @@ class ActiveAgentSignalTests(unittest.TestCase):
         self.assertNotIn("Bot E — Swing trade", self.agents(data))
 
     def test_bot_e_downtrend_emits_bearish_setup(self):
-        data = frame(sma20=101.0, sma50=102.0, rsi14=50.0, rel_volume=1.0)
+        data = frame(sma20=101.0, sma50=102.0, rsi14=50.0, rel_volume=1.2)
         alerts = run_market_agents_enriched("BTCUSDT", "4h", data, CFG)
         self.assertTrue(any(
             x["agent"] == "Bot E — Swing trade" and x["signal"] == "configuração potencial de baixa"
@@ -133,21 +133,21 @@ class ActiveAgentSignalTests(unittest.TestCase):
 
     def test_bot_e_long_target_uses_configured_risk_reward(self):
         cfg = {"thresholds": {**CFG["thresholds"], "min_risk_reward": 2.0}}
-        data = frame(sma20=99.0, sma50=98.0, rsi14=50.0, rel_volume=1.0, atr14=2.0)
+        data = frame(sma20=99.0, sma50=98.0, rsi14=50.0, rel_volume=1.2, atr14=2.0)
         alerts = run_market_agents_enriched("BTCUSDT", "4h", data, cfg)
         alert = next(x for x in alerts if x["agent"] == "Bot E — Swing trade")
         self.assertIn("objetivo ilustrativo: 106", alert["reason"])
 
     def test_bot_e_short_target_uses_configured_risk_reward(self):
         cfg = {"thresholds": {**CFG["thresholds"], "min_risk_reward": 2.0}}
-        data = frame(sma20=101.0, sma50=102.0, rsi14=50.0, rel_volume=1.0, atr14=2.0)
+        data = frame(sma20=101.0, sma50=102.0, rsi14=50.0, rel_volume=1.2, atr14=2.0)
         alerts = run_market_agents_enriched("BTCUSDT", "4h", data, cfg)
         alert = next(x for x in alerts if x["agent"] == "Bot E — Swing trade")
         self.assertIn("objetivo ilustrativo: 94", alert["reason"])
 
     def test_bot_e_rejects_non_positive_risk_reward_configuration(self):
         cfg = {"thresholds": {**CFG["thresholds"], "min_risk_reward": 0}}
-        data = frame(sma20=99.0, sma50=98.0, rsi14=50.0, rel_volume=1.0)
+        data = frame(sma20=99.0, sma50=98.0, rsi14=50.0, rel_volume=1.2)
         with self.assertRaisesRegex(ValueError, "greater than zero"):
             run_market_agents_enriched("BTCUSDT", "4h", data, cfg)
 
