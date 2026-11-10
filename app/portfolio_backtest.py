@@ -329,7 +329,7 @@ def failed_spot_long_test_rows(summaries):
     ]
 
 
-def run(days=180, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
+def run(days=365, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
         initial_cash=10000.0, risk_fraction=0.01, max_exposure_fraction=0.80,
         max_positions=5, stop_atr_multiple=1.5, reward_risk=1.5,
         require_positive_test=True):
@@ -489,7 +489,7 @@ def run(days=180, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Backtest de carteira com posições simultâneas.")
-    parser.add_argument("--days", type=int, default=180)
+    parser.add_argument("--days", type=int, default=365)
     parser.add_argument("--fee-per-side-pct", type=float, default=0.10)
     parser.add_argument("--slippage-per-side-pct", type=float, default=0.05)
     parser.add_argument("--initial-cash", type=float, default=10000.0)
