@@ -111,6 +111,21 @@ class BotFScreeningTests(unittest.TestCase):
         self.assertEqual(result["status"], "review_required")
         self.assertTrue(any("lp_holders" in flag for flag in result["flags"]))
 
+    def test_security_does_not_approve_expired_lp_lock(self):
+        data = {
+            "is_honeypot": "0", "cannot_buy": "0", "cannot_sell_all": "0",
+            "is_blacklisted": "0", "malicious_address": "0", "is_open_source": "1",
+            "is_in_dex": "1", "buy_tax": "0.01", "sell_tax": "0.02",
+            "lp_holders": [{
+                "address": "0xlocker", "percent": "1.0", "is_locked": "1",
+                "balance": "100",
+                "locked_detail": [{"amount": "100", "end_time": str(time.time() - 60)}],
+            }],
+        }
+        result = evaluate_launch_security(data, require_lp=True)
+        self.assertEqual(result["status"], "review_required")
+        self.assertTrue(any("bloqueio expirado" in flag for flag in result["flags"]))
+
     def test_security_rejects_unlocked_lp_holder_with_50pct_concentration(self):
         data = {
             "is_honeypot": "0", "cannot_buy": "0", "cannot_sell_all": "0",
