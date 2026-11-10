@@ -124,39 +124,82 @@ def evaluate_launch_security(data, max_tax=0.05, require_lp=False):
                 review.append(label)
 
     if require_lp:
-        # LP concentration/lock is an independent hard gate. Pool TVL alone does
-        # not prove that liquidity is locked or resistant to a rug pull.
+        # GoPlus returns only the top LP holders. Unknown, partial or expired
+        # lock data cannot be treated as protected liquidity.
         lp_holders = data.get("lp_holders")
         if not isinstance(lp_holders, list) or not lp_holders:
             review.append("lp_holders: distribuição e bloqueio de LP não informados")
         else:
-            unlocked_concentration = 0.0
+            unprotected_concentration = 0.0
+            now_epoch = time.time()
             for index, holder in enumerate(lp_holders):
                 if not isinstance(holder, dict):
                     review.append(f"lp_holders[{index}]: registro inválido")
                     continue
-                raw_percent = holder.get("percent")
                 try:
-                    percent = float(raw_percent)
+                    percent = float(holder.get("percent"))
                     if not math.isfinite(percent) or percent < 0 or percent > 1:
                         raise ValueError()
                 except (TypeError, ValueError, OverflowError):
                     review.append(f"lp_holders[{index}]: concentração percentual ausente/inválida")
                     continue
+
                 locked = str(holder.get("is_locked", "")).strip()
-                if locked == "1":
-                    continue
                 if locked == "0":
-                    unlocked_concentration += percent
-                else:
+                    unprotected_concentration += percent
+                    continue
+                if locked != "1":
                     review.append(f"lp_holders[{index}]: estado de bloqueio não confirmado")
-            if unlocked_concentration >= 0.50:
+                    unprotected_concentration += percent
+                    continue
+
+                details = holder.get("locked_detail")
+                try:
+                    balance = float(holder.get("balance"))
+                    if not math.isfinite(balance) or balance <= 0:
+                        raise ValueError()
+                except (TypeError, ValueError, OverflowError):
+                    review.append(f"lp_holders[{index}]: saldo LP ausente/inválido; bloqueio não quantificável")
+                    unprotected_concentration += percent
+                    continue
+                if not isinstance(details, list) or not details:
+                    review.append(f"lp_holders[{index}]: detalhes/validade do bloqueio não informados")
+                    unprotected_concentration += percent
+                    continue
+
+                future_locked_amount = 0.0
+                invalid_lock_detail = False
+                for detail in details:
+                    if not isinstance(detail, dict):
+                        invalid_lock_detail = True
+                        continue
+                    try:
+                        amount = float(detail.get("amount"))
+                        end_time = float(detail.get("end_time"))
+                        if (not math.isfinite(amount) or amount < 0
+                                or not math.isfinite(end_time) or end_time <= 0):
+                            raise ValueError()
+                    except (TypeError, ValueError, OverflowError):
+                        invalid_lock_detail = True
+                        continue
+                    if end_time > now_epoch:
+                        future_locked_amount += amount
+                if invalid_lock_detail:
+                    review.append(f"lp_holders[{index}]: detalhe de bloqueio inválido")
+                locked_fraction = min(1.0, future_locked_amount / balance)
+                if locked_fraction <= 0:
+                    review.append(f"lp_holders[{index}]: bloqueio expirado ou sem prazo futuro verificável")
+                elif locked_fraction < 0.999:
+                    review.append(f"lp_holders[{index}]: bloqueio parcial ({locked_fraction:.1%} do saldo LP)")
+                unprotected_concentration += percent * (1.0 - locked_fraction)
+
+            if unprotected_concentration >= 0.50:
                 blockers.append(
-                    f"LP não bloqueada agregada concentra {unlocked_concentration:.1%} (limite crítico 50%)"
+                    f"LP não protegida agregada concentra {unprotected_concentration:.1%} (limite crítico 50%)"
                 )
-            elif unlocked_concentration > 0:
+            elif unprotected_concentration > 0:
                 review.append(
-                    f"LP não bloqueada agregada: concentração {unlocked_concentration:.1%}; revisão manual obrigatória"
+                    f"LP não protegida agregada: concentração {unprotected_concentration:.1%}; revisão manual obrigatória"
                 )
 
     if blockers:
