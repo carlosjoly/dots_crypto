@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 import requests
 
-from app.new_launches import _get_json, _market_eligibility, _select_token, _pool_url, _load_seen, _save_seen, _load_review_state, _save_review_state, _review_recheck_due, release_seen_token, _holder_count_review_reason
+from app.new_launches import _get_json, _market_eligibility, _select_token, _pool_url, _load_seen, _save_seen, _load_review_state, _save_review_state, _review_recheck_due, release_seen_token, _holder_count_review_reason, scan_new_launches
 from app.security import evaluate_launch_security, get_goplus_access_token
 import hashlib
 from app.alerts import format_message
@@ -193,6 +193,52 @@ class BotFScreeningTests(unittest.TestCase):
                 "chain_id": "8453", "token_address": "0x" + "a" * 40
             })
             self.assertEqual(_load_seen(state_file), set())
+
+    @patch("app.new_launches.time.sleep")
+    @patch("app.new_launches.goplus_token_security")
+    @patch("app.new_launches.fetch_new_pools")
+    def test_goplus_cycle_limit_stops_before_querying_next_network(self, fetch_pools, goplus, _sleep):
+        with tempfile.TemporaryDirectory() as directory:
+            now = datetime.now(timezone.utc)
+            def pool(address):
+                return {
+                    "pool_id": "pool-" + address[-4:],
+                    "pool_address": "0x" + "f" * 40,
+                    "created_at": (now - timedelta(minutes=30)).isoformat(),
+                    "liquidity_usd": "50000", "volume_24h_usd": "25000",
+                    "txns_24h": {"buys": 40, "sells": 35},
+                    "base": {"symbol": "NEW", "name": "New Token", "address": address},
+                    "quote": {"symbol": "USDC", "address": "0x" + "1" * 40},
+                    "base_price_usd": "0.25", "quote_price_usd": "1",
+                    "dex": "Test DEX", "network": "eth",
+                }
+            fetch_pools.return_value = [pool("0x" + "2" * 40)]
+            goplus.return_value = {
+                "is_honeypot": "0", "cannot_buy": "0", "cannot_sell_all": "0",
+                "is_blacklisted": "0", "malicious_address": "0", "is_open_source": "1",
+                "is_in_dex": "1", "buy_tax": "0.01", "sell_tax": "0.01",
+                "holder_count": "100",
+                "lp_holders": [{"address": "0xlocker", "percent": "1.0", "is_locked": "1"}],
+            }
+            cfg = {
+                "_root": directory,
+                "_env": {"goplus_enabled": True},
+                "launches": {
+                    "networks": ["eth", "base"], "quote_symbols": ["USDC"],
+                    "min_pool_age_minutes": 5, "max_pool_age_hours": 48,
+                    "min_liquidity_usd": 25000, "min_volume_24h_usd": 10000,
+                    "min_txns_24h": 50, "min_holder_count": 10,
+                    "max_security_checks_per_cycle": 1, "max_buy_sell_tax": 0.05,
+                    "seen_state_file": "data/seen.json",
+                    "review_state_file": "data/review.json",
+                    "review_recheck_minutes": 30,
+                },
+            }
+            alerts = scan_new_launches(cfg)
+            self.assertEqual(len(alerts), 1)
+            self.assertEqual(fetch_pools.call_count, 1)
+            self.assertEqual(goplus.call_count, 1)
+
 
     @patch("app.security.time.time", return_value=1700000000)
     @patch("app.security.requests.post")
