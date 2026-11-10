@@ -448,6 +448,12 @@ def scan_new_launches(cfg):
             if assessment["status"] == "rejected":
                 seen.add(identity)
                 review_state.pop(identity, None)
+                log.warning(
+                    "Bot F bloqueado: %s %s — %s",
+                    network, token["address"], "; ".join(assessment.get("flags") or ["risco crítico"]),
+                )
+                # A rejected token must never fall through to the alert/approval block.
+                continue
             elif assessment["status"] != "eligible_for_watchlist":
                 review_state[identity] = {
                     "checked_at": now.isoformat(),
