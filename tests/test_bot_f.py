@@ -141,7 +141,7 @@ class BotFScreeningTests(unittest.TestCase):
             }],
         }
         result = evaluate_launch_security(data, require_lp=True)
-        self.assertEqual(result["status"], "review_required")
+        self.assertEqual(result["status"], "rejected")
         self.assertTrue(any("bloqueio expirado" in flag for flag in result["flags"]))
 
     def test_security_rejects_unlocked_lp_holder_with_50pct_concentration(self):
@@ -154,7 +154,7 @@ class BotFScreeningTests(unittest.TestCase):
         }
         result = evaluate_launch_security(data, require_lp=True)
         self.assertEqual(result["status"], "rejected")
-        self.assertTrue(any("LP não bloqueada agregada concentra" in flag for flag in result["flags"]))
+        self.assertTrue(any("LP não protegida agregada concentra" in flag for flag in result["flags"]))
 
     def test_security_rejects_non_finite_tax_and_lp_percent(self):
         base = {
