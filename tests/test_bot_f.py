@@ -541,8 +541,6 @@ class BotFScreeningTests(unittest.TestCase):
 
     @patch("app.new_launches.time.sleep")
     @patch("app.new_launches.fetch_new_pools")
-    @patch("app.new_launches.time.sleep")
-    @patch("app.new_launches.fetch_new_pools")
     def test_scan_persists_each_pool_and_grouped_liquidity_diagnostics(
         self, fetch_pools, _sleep
     ):
@@ -593,6 +591,8 @@ class BotFScreeningTests(unittest.TestCase):
             self.assertEqual(payload["pools"][0]["liquidity_raw_usd"], None)
             self.assertEqual(payload["pools"][0]["market_filter_reason"], "liquidez ausente no fornecedor")
 
+    @patch("app.new_launches.time.sleep")
+    @patch("app.new_launches.fetch_new_pools")
     def test_diagnostics_count_each_market_filter_and_security_limit(self, fetch_pools, _sleep):
         with tempfile.TemporaryDirectory() as directory:
             now = datetime.now(timezone.utc)
