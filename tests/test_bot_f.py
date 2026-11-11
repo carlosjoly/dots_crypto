@@ -299,7 +299,11 @@ class BotFScreeningTests(unittest.TestCase):
                 },
             }
             alerts = scan_new_launches(cfg)
-            self.assertEqual(len(alerts), 1)
+            self.assertEqual(len(alerts), 2)
+            self.assertEqual(
+                {alert["discovery_status"] for alert in alerts},
+                {"ELEGÍVEL PARA WATCHLIST — NÃO É RECOMENDAÇÃO", "PENDENTE DE REVISÃO — NÃO APROVADO"},
+            )
             # Discovery continues across all networks even after the GoPlus cap is reached.
             self.assertEqual(fetch_pools.call_count, 2)
             self.assertEqual(goplus.call_count, 1)
@@ -556,7 +560,10 @@ class BotFScreeningTests(unittest.TestCase):
                 },
             }
             with self.assertLogs("dot_cripto.bot_f", level="INFO") as captured:
-                scan_new_launches(cfg)
+                alerts = scan_new_launches(cfg)
+            self.assertEqual(len(alerts), 1)
+            self.assertEqual(alerts[0]["discovery_status"], "PENDENTE DE REVISÃO — NÃO APROVADO")
+            self.assertEqual(alerts[0]["goplus_status"], "security_check_deferred")
             diagnostic = next(line for line in captured.output if "Bot F diagnóstico ciclo:" in line)
             self.assertIn('"age": 1', diagnostic)
             self.assertIn('"liquidity": 1', diagnostic)
