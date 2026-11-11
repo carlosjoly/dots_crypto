@@ -42,10 +42,16 @@ def main():
                 alert.get("token_address", "N/D"),
             )
 
+    pending = sum(
+        1 for alert in alerts
+        if alert.get("discovery_status") == "PENDENTE DE REVISÃO — NÃO APROVADO"
+    )
+    approved = len(alerts) - pending
     log.info(
-        "Bot F standalone concluído: candidatos_aprovados=%d; alertas_processados=%d; "
-        "falhas_de_entrega=%d; telegram_configurado=%s.",
-        len(alerts),
+        "Bot F standalone concluído: descoberta_pendente=%d; candidatos_aprovados=%d; "
+        "alertas_processados=%d; falhas_de_entrega=%d; telegram_configurado=%s.",
+        pending,
+        approved,
         processed,
         delivery_errors,
         bool(cfg["_env"].get("telegram_bot_token") and cfg["_env"].get("telegram_chat_id")),
