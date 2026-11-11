@@ -242,6 +242,8 @@ def format_message(alert):
         extra_lines.append(f"Liquidez observada: US$ {_number(alert['liquidity_usd'], 2)}")
     if alert.get("volume_24h_usd") is not None:
         extra_lines.append(f"Volume 24h: US$ {_number(alert['volume_24h_usd'], 2)}")
+    if alert.get("discovery_status"):
+        extra_lines.append(f"Status do pool: {alert['discovery_status']}")
     if alert.get("goplus_status"):
         extra_lines.append(f"Triagem GoPlus: {alert['goplus_status']}")
     if alert.get("source_freshness_status"):
