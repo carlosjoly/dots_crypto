@@ -21,6 +21,8 @@ MAX_RETRIES = 3
 RETRY_JITTER_SECONDS = 2
 MIN_RETRY_AFTER_SECONDS = REQUEST_INTERVAL_SECONDS
 API_METRICS_PATH = Path(__file__).resolve().parents[1] / "data" / "bot_f_api_metrics.jsonl"
+POOL_DIAGNOSTICS_PATH = Path(__file__).resolve().parents[1] / "data" / "bot_f_pool_diagnostics.json"
+LIQUIDITY_CATEGORIES = ("below_minimum", "missing", "invalid", "zero", "passed")
 GECKO_NETWORK_IDS = {"avalanche": "avax"}
 GECKO_ACCEPT = "application/json;version=20230203"
 
@@ -211,6 +213,41 @@ def _number(value):
     except (TypeError, ValueError):
         return None
 
+def _classify_liquidity(value, minimum):
+    """Classify provider liquidity data without changing the fail-closed threshold."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return "missing", None
+    parsed = _number(value)
+    if parsed is None:
+        return "invalid", None
+    if parsed == 0:
+        return "zero", parsed
+    if parsed < float(minimum):
+        return "below_minimum", parsed
+    return "passed", parsed
+
+
+def _write_pool_diagnostics(records, generated_at, minimum_liquidity, network_dex_summary):
+    """Persist every returned pool and grouped diagnostics for the current run."""
+    counts = {category: 0 for category in LIQUIDITY_CATEGORIES}
+    for record in records:
+        counts[record["liquidity_classification"]] += 1
+    payload = {
+        "generated_at_utc": generated_at.isoformat(),
+        "provider": "GeckoTerminal",
+        "liquidity_minimum_usd": float(minimum_liquidity),
+        "liquidity_classification_counts": counts,
+        "network_dex_summary": network_dex_summary,
+        "pools": records,
+    }
+    POOL_DIAGNOSTICS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temporary = POOL_DIAGNOSTICS_PATH.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    temporary.replace(POOL_DIAGNOSTICS_PATH)
+    log.info("Bot F diagnóstico individual: arquivo=%s; pools=%d; liquidez=%s",
+             POOL_DIAGNOSTICS_PATH, len(records), json.dumps(counts, ensure_ascii=False, sort_keys=True))
+
+
 def _created_at(value):
     if not value:
         return None
@@ -277,7 +314,9 @@ def _market_eligibility(pool, cfg, now=None):
         return False, "pool recém-criado; aguardando maturação mínima"
     if age_minutes > float(settings["max_pool_age_hours"]) * 60:
         return False, "pool fora da janela de lançamento"
-    liquidity = _number(pool.get("liquidity_usd"))
+    liquidity_class, liquidity = _classify_liquidity(
+        pool.get("liquidity_usd"), settings["min_liquidity_usd"]
+    )
     volume = _number(pool.get("volume_24h_usd"))
     txns = pool.get("txns_24h") or {}
     txn_count = None
@@ -286,8 +325,14 @@ def _market_eligibility(pool, cfg, now=None):
         sells = _number(txns.get("sells"))
         if buys is not None and sells is not None:
             txn_count = buys + sells
-    if liquidity is None or liquidity < float(settings["min_liquidity_usd"]):
-        return False, "liquidez abaixo do mínimo ou não informada"
+    if liquidity_class != "passed":
+        reasons = {
+            "below_minimum": "liquidez abaixo do mínimo",
+            "missing": "liquidez ausente no fornecedor",
+            "invalid": "liquidez inválida no fornecedor",
+            "zero": "liquidez igual a zero no fornecedor",
+        }
+        return False, reasons[liquidity_class]
     if volume is None or volume < float(settings["min_volume_24h_usd"]):
         return False, "volume de 24h abaixo do mínimo ou não informado"
     if txn_count is None or txn_count < int(settings["min_txns_24h"]):
@@ -456,6 +501,8 @@ def scan_new_launches(cfg):
     examined = 0
     checked_this_cycle = set()
     network_summary = {}
+    pool_diagnostic_records = []
+    network_dex_summary = {}
     diagnostics = {
         "pools_received": 0,
         "invalid_token_or_address": 0,
@@ -510,6 +557,39 @@ def scan_new_launches(cfg):
             time.sleep(REQUEST_INTERVAL_SECONDS)
 
         for pool in pools:
+            liquidity_class, parsed_liquidity = _classify_liquidity(
+                pool.get("liquidity_usd"), settings["min_liquidity_usd"]
+            )
+            dex_name = str(pool.get("dex") or "N/D")
+            group_key = f"{network_slug}|{dex_name}"
+            group = network_dex_summary.setdefault(group_key, {
+                "network": network_slug, "dex": dex_name, "pools": 0,
+                **{category: 0 for category in LIQUIDITY_CATEGORIES},
+            })
+            group["pools"] += 1
+            group[liquidity_class] += 1
+            base = pool.get("base") if isinstance(pool.get("base"), dict) else {}
+            quote = pool.get("quote") if isinstance(pool.get("quote"), dict) else {}
+            pool_record = {
+                "network": network_slug,
+                "dex": dex_name,
+                "pool_id": pool.get("pool_id"),
+                "pool_address": pool.get("pool_address"),
+                "created_at": pool.get("created_at"),
+                "base_symbol": base.get("symbol"),
+                "base_address": base.get("address"),
+                "quote_symbol": quote.get("symbol"),
+                "quote_address": quote.get("address"),
+                "liquidity_raw_usd": pool.get("liquidity_usd"),
+                "liquidity_parsed_usd": parsed_liquidity,
+                "liquidity_classification": liquidity_class,
+                "liquidity_threshold_usd": float(settings["min_liquidity_usd"]),
+                "volume_24h_usd_raw": pool.get("volume_24h_usd"),
+                "transactions_24h_raw": pool.get("txns_24h"),
+                "market_filter_result": "not_evaluated",
+                "market_filter_reason": None,
+            }
+            pool_diagnostic_records.append(pool_record)
             token = _select_token(pool, settings["quote_symbols"])
             if not token:
                 diagnostics["invalid_token_or_address"] += 1
@@ -524,6 +604,8 @@ def scan_new_launches(cfg):
 
             eligible, market_reason = _market_eligibility(pool, cfg, now)
             if not eligible:
+                pool_record["market_filter_result"] = "rejected"
+                pool_record["market_filter_reason"] = market_reason
                 reason = market_reason.lower()
                 if "pool" in reason or "data de criação" in reason:
                     category = "age"
@@ -541,6 +623,8 @@ def scan_new_launches(cfg):
                 )
                 continue
 
+            pool_record["market_filter_result"] = "passed"
+            pool_record["market_filter_reason"] = market_reason
             diagnostics["market_eligible"] += 1
             network_summary[network]["market_eligible"] += 1
             checked_this_cycle.add(identity)
@@ -672,6 +756,9 @@ def scan_new_launches(cfg):
             ))
             diagnostics["approved_alerts"] += 1
 
+    _write_pool_diagnostics(
+        pool_diagnostic_records, now, settings["min_liquidity_usd"], network_dex_summary
+    )
     _save_seen(state_path, seen)
     _save_review_state(review_state_path, review_state)
     for network, stats in network_summary.items():
