@@ -348,8 +348,81 @@ def release_seen_token(cfg, alert):
     _save_seen(state_path, seen)
 
 
+def _build_launch_alert(network, chain_id, token, pool, now, assessment,
+                        pending=False, security_error=None, market_reason=None):
+    created = _created_at(pool.get("created_at"))
+    if pending:
+        status = "PENDENTE DE REVISÃO — NÃO APROVADO"
+        signal = "NOVO POOL DETECTADO — PENDENTE DE REVISÃO DE SEGURANÇA"
+        security_text = (
+            f"GoPlus indisponível: {security_error}" if security_error
+            else "GoPlus identificou dados insuficientes/itens que exigem revisão manual"
+        )
+        risk_note = (
+            "ATENÇÃO: este pool passou apenas pelos filtros básicos de mercado. "
+            "A validação de contrato, honeypot, taxas, holders e bloqueio da liquidez "
+            "não foi concluída. NÃO É ELEGÍVEL, NÃO É RECOMENDAÇÃO e não deve ser "
+            "interpretado como seguro. Aguarde uma atualização de triagem; sem compra "
+            "ou execução automática."
+        )
+    else:
+        status = "ELEGÍVEL PARA WATCHLIST — NÃO É RECOMENDAÇÃO"
+        signal = "CANDIDATO A ANÁLISE — SEGURANÇA VALIDADA"
+        security_text = (
+            "GoPlus: verificações obrigatórias completas, sem bloqueadores; "
+            f"observações: {', '.join(assessment.get('notes') or []) or 'nenhuma'}"
+        )
+        risk_note = (
+            "Triagem automatizada preliminar. GoPlus não certifica legitimidade nem rentabilidade; "
+            "liquidez pode ser retirada, preços podem ser manipulados e a cobertura pode ser incompleta. "
+            "Exige análise manual adicional. Sem compra ou execução automática."
+        )
+
+    liquidity = _number(pool.get("liquidity_usd"))
+    volume = _number(pool.get("volume_24h_usd"))
+    txns = pool.get("txns_24h") or {}
+    buys = _number(txns.get("buys")) if isinstance(txns, dict) else None
+    sells = _number(txns.get("sells")) if isinstance(txns, dict) else None
+    txn_count = int(buys + sells) if buys is not None and sells is not None else None
+    reason_parts = [
+        f"Novo pool detectado na rede {network}; DEX: {pool.get('dex')}.",
+        f"Contrato: {token['address']}.",
+        f"Liquidez observada: US$ {liquidity:,.2f}." if liquidity is not None else "Liquidez: N/D.",
+        f"Volume 24h: US$ {volume:,.2f}." if volume is not None else "Volume 24h: N/D.",
+        f"Transações 24h: {txn_count}." if txn_count is not None else "Transações 24h: N/D.",
+        security_text + ".",
+    ]
+    if pending:
+        reason_parts.append(
+            "Motivos para revisão: " + "; ".join(assessment.get("flags") or ["validação de segurança não concluída"]) + "."
+        )
+    return {
+        "agent": "Bot F — Descoberta de pools",
+        "symbol": token["symbol"],
+        "timeframe": "Lançamento DEX",
+        "price": token["price_usd"],
+        "signal": signal,
+        "discovery_status": status,
+        "reason": " ".join(reason_parts),
+        "confidence": "não calibrada",
+        "risk_note": risk_note,
+        "candle_time_utc": now.isoformat(),
+        "pool_created_at_utc": created.isoformat() if created else None,
+        "pool_url": _pool_url(network, pool),
+        "pool_id": pool.get("pool_id"),
+        "token_address": token["address"],
+        "network": network,
+        "chain_id": chain_id,
+        "liquidity_usd": liquidity,
+        "volume_24h_usd": volume,
+        "goplus_status": assessment.get("status", "unavailable"),
+        "goplus_flags": list(assessment.get("flags") or []),
+        "market_filter": market_reason or "filtros básicos de mercado aprovados",
+    }
+
+
 def scan_new_launches(cfg):
-    """Return only screened candidates; no market order is ever submitted."""
+    """Discover basic-market-qualified pools and separately report security outcomes."""
     env = cfg["_env"]
     if not env.get("goplus_enabled"):
         raise RuntimeError("Bot F bloqueado: GOPLUS_ENABLED não está habilitado.")
@@ -367,10 +440,31 @@ def scan_new_launches(cfg):
         checked_at = _created_at(record.get("checked_at") if isinstance(record, dict) else record)
         if checked_at is None or checked_at < review_cutoff:
             review_state.pop(identity, None)
+
     alerts = []
     examined = 0
     checked_this_cycle = set()
     network_summary = {}
+    diagnostics = {
+        "pools_received": 0,
+        "invalid_token_or_address": 0,
+        "already_seen": 0,
+        "review_cooldown": 0,
+        "market_eligible": 0,
+        "market_rejected": {"age": 0, "liquidity": 0, "volume": 0, "transactions": 0, "other": 0},
+        "market_rejection_reasons": {},
+        "goplus_attempted": 0,
+        "goplus_errors": 0,
+        "goplus_rejected": 0,
+        "goplus_review_required": 0,
+        "goplus_approved": 0,
+        "goplus_rejection_reasons": {},
+        "lp_findings": {},
+        "security_limit_skipped": 0,
+        "pending_discovery_alerts": 0,
+        "approved_alerts": 0,
+    }
+
     if bool(env.get("goplus_app_key")) != bool(env.get("goplus_app_secret")):
         raise RuntimeError("Configure GOPLUS_APP_KEY e GOPLUS_APP_SECRET em conjunto.")
     access_token = None
@@ -378,22 +472,23 @@ def scan_new_launches(cfg):
         access_token = get_goplus_access_token(env["goplus_app_key"], env["goplus_app_secret"])
 
     max_security_checks = max(0, int(settings["max_security_checks_per_cycle"]))
-    limit_reached = False
     for network in settings["networks"]:
-        if examined >= max_security_checks:
-            limit_reached = True
-            log.warning("Bot F: limite de verificações GoPlus por ciclo atingido; redes restantes ignoradas.")
-            break
         network_slug = gecko_network_id(network)
-        network_summary[network] = {"gecko_slug": network_slug, "pools": 0, "market_eligible": 0,
-                                    "security_checked": 0, "approved": 0, "status": "started"}
+        network_summary[network] = {
+            "gecko_slug": network_slug, "pools": 0, "market_eligible": 0,
+            "security_checked": 0, "security_errors": 0, "rejected": 0,
+            "review_required": 0, "approved": 0, "pending_alerts": 0,
+            "status": "started",
+        }
         chain_id = NETWORKS.get(network)
         if not chain_id:
+            network_summary[network]["status"] = "unsupported_network"
             log.warning("Bot F: rede sem mapeamento GoPlus, ignorada: %s", network)
             continue
         try:
             pools = fetch_new_pools(network)
             network_summary[network]["pools"] = len(pools)
+            diagnostics["pools_received"] += len(pools)
             network_summary[network]["status"] = "collected"
         except Exception as exc:
             network_summary[network]["status"] = f"collection_error:{type(exc).__name__}"
@@ -401,28 +496,54 @@ def scan_new_launches(cfg):
                           network, network_slug)
             continue
         finally:
-            # Keep a fixed inter-network pause even when one network fails.
             time.sleep(REQUEST_INTERVAL_SECONDS)
 
         for pool in pools:
             token = _select_token(pool, settings["quote_symbols"])
             if not token:
+                diagnostics["invalid_token_or_address"] += 1
                 continue
             identity = f"{chain_id}:{token['address']}"
             if identity in seen or identity in checked_this_cycle:
+                diagnostics["already_seen"] += 1
                 continue
             if not _review_recheck_due(identity, review_state, now, review_recheck_minutes):
+                diagnostics["review_cooldown"] += 1
                 continue
+
             eligible, market_reason = _market_eligibility(pool, cfg, now)
             if not eligible:
+                reason = market_reason.lower()
+                if "pool" in reason or "data de criação" in reason:
+                    category = "age"
+                elif "liquidez" in reason:
+                    category = "liquidity"
+                elif "volume" in reason:
+                    category = "volume"
+                elif "transaç" in reason:
+                    category = "transactions"
+                else:
+                    category = "other"
+                diagnostics["market_rejected"][category] += 1
+                diagnostics["market_rejection_reasons"][market_reason] = (
+                    diagnostics["market_rejection_reasons"].get(market_reason, 0) + 1
+                )
                 continue
+
+            diagnostics["market_eligible"] += 1
             network_summary[network]["market_eligible"] += 1
-            if examined >= max_security_checks:
-                limit_reached = True
-                log.warning("Bot F: limite de verificações GoPlus por ciclo atingido.")
-                break
-            examined += 1
             checked_this_cycle.add(identity)
+
+            if examined >= max_security_checks:
+                diagnostics["security_limit_skipped"] += 1
+                log.warning(
+                    "Bot F: limite GoPlus atingido; pool básico elegível ficou sem validação: %s:%s",
+                    network, token["address"],
+                )
+                continue
+
+            examined += 1
+            diagnostics["goplus_attempted"] += 1
             network_summary[network]["security_checked"] += 1
             try:
                 security = goplus_token_security(
@@ -440,82 +561,95 @@ def scan_new_launches(cfg):
                     if holder_reason:
                         assessment["status"] = "review_required"
                         assessment["flags"].append(holder_reason)
-            except Exception:
+            except Exception as exc:
+                diagnostics["goplus_errors"] += 1
+                network_summary[network]["security_errors"] += 1
+                error_reason = f"{type(exc).__name__}: {str(exc)[:180]}"
                 log.exception("Bot F: GoPlus indisponível para %s:%s", network, token["address"])
-                # Do not mark as seen: a later cycle may obtain a valid security response.
+                prior = review_state.get(identity, {})
+                already_notified = bool(prior.get("discovery_alert_sent")) if isinstance(prior, dict) else False
+                review_state[identity] = {
+                    "checked_at": now.isoformat(),
+                    "status": "goplus_unavailable",
+                    "flags": [error_reason],
+                    "discovery_alert_sent": already_notified,
+                }
+                if not already_notified:
+                    unknown = {"status": "goplus_unavailable", "flags": [error_reason], "notes": []}
+                    alerts.append(_build_launch_alert(
+                        network, chain_id, token, pool, now, unknown,
+                        pending=True, security_error=error_reason, market_reason=market_reason,
+                    ))
+                    diagnostics["pending_discovery_alerts"] += 1
+                    network_summary[network]["pending_alerts"] += 1
+                    review_state[identity]["discovery_alert_sent"] = True
                 continue
 
+            flags = list(assessment.get("flags") or [])
+            for flag in flags:
+                diagnostics["goplus_rejection_reasons"][flag] = (
+                    diagnostics["goplus_rejection_reasons"].get(flag, 0) + 1
+                )
+                if "lp" in flag.lower() or "liquidez" in flag.lower():
+                    diagnostics["lp_findings"][flag] = diagnostics["lp_findings"].get(flag, 0) + 1
+
             if assessment["status"] == "rejected":
+                diagnostics["goplus_rejected"] += 1
+                network_summary[network]["rejected"] += 1
                 seen.add(identity)
                 review_state.pop(identity, None)
                 log.warning(
                     "Bot F bloqueado: %s %s — %s",
-                    network, token["address"], "; ".join(assessment.get("flags") or ["risco crítico"]),
+                    network, token["address"], "; ".join(flags or ["risco crítico"]),
                 )
-                # A rejected token must never fall through to the alert/approval block.
                 continue
-            elif assessment["status"] != "eligible_for_watchlist":
+
+            if assessment["status"] != "eligible_for_watchlist":
+                diagnostics["goplus_review_required"] += 1
+                network_summary[network]["review_required"] += 1
+                prior = review_state.get(identity, {})
+                already_notified = bool(prior.get("discovery_alert_sent")) if isinstance(prior, dict) else False
                 review_state[identity] = {
                     "checked_at": now.isoformat(),
-                    "flags": list(assessment.get("flags") or []),
+                    "status": "review_required",
+                    "flags": flags,
+                    "discovery_alert_sent": already_notified,
                 }
                 log.info(
-                    "Bot F rejeitado/revisão: %s %s — %s",
-                    network, token["address"], "; ".join(assessment["flags"]),
+                    "Bot F pendente de revisão: %s %s — %s",
+                    network, token["address"], "; ".join(flags or ["dados insuficientes"]),
                 )
+                if not already_notified:
+                    alerts.append(_build_launch_alert(
+                        network, chain_id, token, pool, now, assessment,
+                        pending=True, market_reason=market_reason,
+                    ))
+                    diagnostics["pending_discovery_alerts"] += 1
+                    network_summary[network]["pending_alerts"] += 1
+                    review_state[identity]["discovery_alert_sent"] = True
                 continue
-            else:
-                seen.add(identity)
-                review_state.pop(identity, None)
 
-            created = _created_at(pool.get("created_at"))
+            diagnostics["goplus_approved"] += 1
             network_summary[network]["approved"] += 1
-            alerts.append({
-                "agent": "Bot F — Novos lançamentos",
-                "symbol": token["symbol"],
-                "timeframe": "Lançamento DEX",
-                "price": token["price_usd"],
-                "signal": "CANDIDATO A ANÁLISE — NÃO É RECOMENDAÇÃO",
-                "reason": (
-                    f"Novo pool detectado na rede {network}; DEX: {pool.get('dex')}. "
-                    f"Contrato: {token['address']}. "
-                    f"Liquidez observada: US$ {_number(pool.get('liquidity_usd')):,.2f}. "
-                    f"Volume 24h: US$ {_number(pool.get('volume_24h_usd')):,.2f}. "
-                    f"Transações 24h: {int(pool['txns_24h']['buys']) + int(pool['txns_24h']['sells'])}. "
-                    f"GoPlus: verificações obrigatórias sem alerta crítico; "
-                    f"campos adicionais: {', '.join(assessment['notes']) or 'sem observação adicional'}."
-                ),
-                "change_pct": None, "relative_volume": None, "rsi": None, "atr": None,
-                "confidence": "não calibrada",
-                "risk_note": (
-                    "Triagem automatizada preliminar. GoPlus não certifica legitimidade nem rentabilidade; "
-                    "liquidez pode ser retirada, preços podem ser manipulados e a cobertura pode ser incompleta. "
-                    "Exige análise manual, verificação de LP, holders, equipe, tokenomics e execução de venda. "
-                    "Sem compra ou execução automática."
-                ),
-                "candle_time_utc": now.isoformat(),
-                "pool_created_at_utc": created.isoformat() if created else None,
-                "pool_url": _pool_url(network, pool),
-                "pool_id": pool.get("pool_id"),
-                "token_address": token["address"],
-                "network": network,
-                "chain_id": chain_id,
-                "liquidity_usd": _number(pool.get("liquidity_usd")),
-                "volume_24h_usd": _number(pool.get("volume_24h_usd")),
-                "goplus_status": assessment["status"],
-                "goplus_flags": assessment["flags"],
-                "market_filter": market_reason,
-            })
-        if limit_reached or examined >= max_security_checks:
-            break
+            seen.add(identity)
+            review_state.pop(identity, None)
+            alerts.append(_build_launch_alert(
+                network, chain_id, token, pool, now, assessment,
+                pending=False, market_reason=market_reason,
+            ))
+            diagnostics["approved_alerts"] += 1
+
     _save_seen(state_path, seen)
     _save_review_state(review_state_path, review_state)
     for network, stats in network_summary.items():
-        log.info("Bot F resumo rede: network_config=%s; gecko_slug=%s; status=%s; pools=%d; "
-                 "market_eligible=%d; security_checked=%d; approved=%d.",
-                 network, stats["gecko_slug"], stats["status"], stats["pools"],
-                 stats["market_eligible"], stats["security_checked"], stats["approved"])
-    log.info("Bot F resumo ciclo: redes=%d; pools=%d; verificações_GoPlus=%d; aprovados=%d.",
-             len(network_summary), sum(x["pools"] for x in network_summary.values()),
-             sum(x["security_checked"] for x in network_summary.values()), len(alerts))
+        log.info("Bot F resumo rede: network_config=%s; gecko_slug=%s; %s",
+                 network, stats["gecko_slug"], json.dumps(stats, ensure_ascii=False, sort_keys=True))
+    log.info("Bot F diagnóstico ciclo: %s", json.dumps(diagnostics, ensure_ascii=False, sort_keys=True))
+    log.info(
+        "Bot F resumo ciclo: redes=%d; pools=%d; verificações_GoPlus=%d; "
+        "pendentes_revisão=%d; aprovados=%d; rejeitados=%d; erros_GoPlus=%d.",
+        len(network_summary), diagnostics["pools_received"], diagnostics["goplus_attempted"],
+        diagnostics["pending_discovery_alerts"], diagnostics["approved_alerts"],
+        diagnostics["goplus_rejected"], diagnostics["goplus_errors"],
+    )
     return alerts
