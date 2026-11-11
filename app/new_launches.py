@@ -551,6 +551,28 @@ def scan_new_launches(cfg):
                     "Bot F: limite GoPlus atingido; pool básico elegível ficou sem validação: %s:%s",
                     network, token["address"],
                 )
+                prior = review_state.get(identity, {})
+                already_notified = bool(prior.get("discovery_alert_sent")) if isinstance(prior, dict) else False
+                review_state[identity] = {
+                    "checked_at": now.isoformat(),
+                    "status": "security_check_deferred",
+                    "flags": ["limite de consultas GoPlus do ciclo atingido; validação adiada"],
+                    "discovery_alert_sent": already_notified,
+                }
+                if not already_notified:
+                    deferred = {
+                        "status": "security_check_deferred",
+                        "flags": ["limite de consultas GoPlus do ciclo atingido; validação adiada"],
+                        "notes": [],
+                    }
+                    alerts.append(_build_launch_alert(
+                        network, chain_id, token, pool, now, deferred,
+                        pending=True, security_error="validação GoPlus adiada pelo limite por ciclo",
+                        market_reason=market_reason,
+                    ))
+                    diagnostics["pending_discovery_alerts"] += 1
+                    network_summary[network]["pending_alerts"] += 1
+                    review_state[identity]["discovery_alert_sent"] = True
                 continue
 
             examined += 1
