@@ -300,7 +300,8 @@ class BotFScreeningTests(unittest.TestCase):
             }
             alerts = scan_new_launches(cfg)
             self.assertEqual(len(alerts), 1)
-            self.assertEqual(fetch_pools.call_count, 1)
+            # Discovery continues across all networks even after the GoPlus cap is reached.
+            self.assertEqual(fetch_pools.call_count, 2)
             self.assertEqual(goplus.call_count, 1)
 
 
@@ -469,6 +470,100 @@ class BotFScreeningTests(unittest.TestCase):
     def test_invalid_review_timestamp_is_rechecked_instead_of_permanently_skipped(self):
         self.assertTrue(_review_recheck_due("56:0xabc", {"56:0xabc": {"checked_at": "invalid"}}, self.now, 30))
         self.assertTrue(_review_recheck_due("56:0xabc", {}, self.now, 30))
+
+
+    @patch("app.new_launches.time.sleep")
+    @patch("app.new_launches.goplus_token_security")
+    @patch("app.new_launches.fetch_new_pools")
+    def test_market_qualified_but_incomplete_security_emits_pending_discovery_alert(
+        self, fetch_pools, goplus, _sleep
+    ):
+        with tempfile.TemporaryDirectory() as directory:
+            now = datetime.now(timezone.utc)
+            address = "0x" + "3" * 40
+            pool = {
+                "pool_id": "eth_0x" + "f" * 40, "pool_address": "0x" + "f" * 40,
+                "created_at": (now - timedelta(minutes=30)).isoformat(),
+                "liquidity_usd": "50000", "volume_24h_usd": "25000",
+                "txns_24h": {"buys": 40, "sells": 35},
+                "base": {"symbol": "NEW", "name": "New Token", "address": address},
+                "quote": {"symbol": "USDC", "address": "0x" + "1" * 40},
+                "base_price_usd": "0.25", "quote_price_usd": "1",
+                "dex": "Test DEX", "network": "eth",
+            }
+            fetch_pools.return_value = [pool]
+            goplus.return_value = {
+                "is_honeypot": "0", "cannot_buy": "0", "cannot_sell_all": "0",
+                "is_blacklisted": "0", "is_open_source": "1", "is_in_dex": "1",
+                "buy_tax": "0.01", "sell_tax": "0.01", "holder_count": "100",
+                # Deliberately missing LP evidence: must remain pending, never approved.
+            }
+            cfg = {
+                "_root": directory, "_env": {"goplus_enabled": True},
+                "launches": {
+                    "networks": ["eth"], "quote_symbols": ["USDC"],
+                    "min_pool_age_minutes": 5, "max_pool_age_hours": 48,
+                    "min_liquidity_usd": 25000, "min_volume_24h_usd": 10000,
+                    "min_txns_24h": 50, "min_holder_count": 10,
+                    "max_security_checks_per_cycle": 15, "max_buy_sell_tax": 0.05,
+                    "seen_state_file": "data/seen.json",
+                    "review_state_file": "data/review.json", "review_recheck_minutes": 30,
+                },
+            }
+            alerts = scan_new_launches(cfg)
+            self.assertEqual(len(alerts), 1)
+            self.assertEqual(alerts[0]["discovery_status"], "PENDENTE DE REVISÃO — NÃO APROVADO")
+            self.assertEqual(alerts[0]["goplus_status"], "review_required")
+            self.assertIn("NÃO É ELEGÍVEL", alerts[0]["risk_note"])
+            self.assertEqual(_load_seen(Path(directory) / "data/seen.json"), set())
+            identity = "1:" + address
+            state = _load_review_state(Path(directory) / "data/review.json")
+            self.assertTrue(state[identity]["discovery_alert_sent"])
+
+            # Same token is not spammed every 15-minute scan while in review cooldown.
+            self.assertEqual(scan_new_launches(cfg), [])
+            self.assertEqual(goplus.call_count, 1)
+
+    @patch("app.new_launches.time.sleep")
+    @patch("app.new_launches.fetch_new_pools")
+    def test_diagnostics_count_each_market_filter_and_security_limit(self, fetch_pools, _sleep):
+        with tempfile.TemporaryDirectory() as directory:
+            now = datetime.now(timezone.utc)
+            def make_pool(index, age=30, liquidity=50000, volume=25000, txns=75):
+                return {
+                    "pool_id": f"eth_pool_{index}", "pool_address": "0x" + "f" * 40,
+                    "created_at": (now - timedelta(minutes=age)).isoformat(),
+                    "liquidity_usd": str(liquidity), "volume_24h_usd": str(volume),
+                    "txns_24h": {"buys": txns // 2, "sells": txns - txns // 2},
+                    "base": {"symbol": "NEW", "name": "New Token", "address": "0x" + str(index) * 40},
+                    "quote": {"symbol": "USDC", "address": "0x" + "1" * 40},
+                    "base_price_usd": "0.25", "quote_price_usd": "1",
+                    "dex": "Test DEX", "network": "eth",
+                }
+            fetch_pools.return_value = [
+                make_pool(2, age=1), make_pool(3, liquidity=1),
+                make_pool(4, volume=1), make_pool(5, txns=1), make_pool(6),
+            ]
+            cfg = {
+                "_root": directory, "_env": {"goplus_enabled": True},
+                "launches": {
+                    "networks": ["eth"], "quote_symbols": ["USDC"],
+                    "min_pool_age_minutes": 5, "max_pool_age_hours": 48,
+                    "min_liquidity_usd": 25000, "min_volume_24h_usd": 10000,
+                    "min_txns_24h": 50, "min_holder_count": 10,
+                    "max_security_checks_per_cycle": 0, "max_buy_sell_tax": 0.05,
+                    "seen_state_file": "data/seen.json", "review_state_file": "data/review.json",
+                },
+            }
+            with self.assertLogs("dot_cripto.bot_f", level="INFO") as captured:
+                scan_new_launches(cfg)
+            diagnostic = next(line for line in captured.output if "Bot F diagnóstico ciclo:" in line)
+            self.assertIn('"age": 1', diagnostic)
+            self.assertIn('"liquidity": 1', diagnostic)
+            self.assertIn('"volume": 1', diagnostic)
+            self.assertIn('"transactions": 1', diagnostic)
+            self.assertIn('"security_limit_skipped": 1', diagnostic)
+            self.assertIn('"market_eligible": 1', diagnostic)
 
 
 if __name__ == "__main__":
