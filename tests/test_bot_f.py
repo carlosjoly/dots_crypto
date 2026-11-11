@@ -300,7 +300,8 @@ class BotFScreeningTests(unittest.TestCase):
             }
             alerts = scan_new_launches(cfg)
             self.assertEqual(len(alerts), 1)
-            self.assertEqual(fetch_pools.call_count, 1)
+            # Discovery continues across all networks even after the GoPlus cap is reached.
+            self.assertEqual(fetch_pools.call_count, 2)
             self.assertEqual(goplus.call_count, 1)
 
 
