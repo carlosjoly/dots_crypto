@@ -1,3 +1,4 @@
+import json
 import tempfile
 import time
 import unittest
@@ -7,7 +8,7 @@ from unittest.mock import Mock, patch
 
 import requests
 
-from app.new_launches import _get_json, _market_eligibility, _select_token, _pool_url, _load_seen, _save_seen, _load_review_state, _save_review_state, _review_recheck_due, release_seen_token, _holder_count_review_reason, scan_new_launches
+from app.new_launches import _get_json, _market_eligibility, _select_token, _pool_url, _load_seen, _save_seen, _load_review_state, _save_review_state, _review_recheck_due, release_seen_token, _holder_count_review_reason, _classify_liquidity, scan_new_launches
 from app.security import evaluate_launch_security, get_goplus_access_token
 import hashlib
 from app.alerts import format_message
@@ -52,6 +53,16 @@ class BotFScreeningTests(unittest.TestCase):
         )
         self.assertIsNone(_pool_url("avalanche", {"pool_address": None}))
         self.assertIsNone(_pool_url("avalanche", {"pool_address": "0x" + "b" * 64}))
+
+    def test_liquidity_classification_separates_all_provider_data_cases(self):
+        minimum = 25000
+        self.assertEqual(_classify_liquidity("24999.99", minimum), ("below_minimum", 24999.99))
+        self.assertEqual(_classify_liquidity(None, minimum), ("missing", None))
+        self.assertEqual(_classify_liquidity("   ", minimum), ("missing", None))
+        self.assertEqual(_classify_liquidity("not-a-number", minimum), ("invalid", None))
+        self.assertEqual(_classify_liquidity("NaN", minimum), ("invalid", None))
+        self.assertEqual(_classify_liquidity("0", minimum), ("zero", 0.0))
+        self.assertEqual(_classify_liquidity("25000", minimum), ("passed", 25000.0))
 
     def test_market_filters_require_age_liquidity_volume_and_transactions(self):
         ok, _ = _market_eligibility(self.pool, self.cfg, self.now)
@@ -530,6 +541,60 @@ class BotFScreeningTests(unittest.TestCase):
 
     @patch("app.new_launches.time.sleep")
     @patch("app.new_launches.fetch_new_pools")
+    @patch("app.new_launches.POOL_DIAGNOSTICS_PATH")
+    @patch("app.new_launches.time.sleep")
+    @patch("app.new_launches.fetch_new_pools")
+    def test_scan_persists_each_pool_and_grouped_liquidity_diagnostics(
+        self, fetch_pools, _sleep, diagnostics_path
+    ):
+        with tempfile.TemporaryDirectory() as directory:
+            diagnostics_path.__class__ = Path
+            target = Path(directory) / "bot_f_pool_diagnostics.json"
+            diagnostics_path.return_value = target
+            now = datetime.now(timezone.utc)
+            base = {
+                "pool_address": "0x" + "f" * 40,
+                "created_at": (now - timedelta(minutes=30)).isoformat(),
+                "volume_24h_usd": "25000",
+                "txns_24h": {"buys": 40, "sells": 35},
+                "base": {"symbol": "NEW", "address": "0x" + "2" * 40},
+                "quote": {"symbol": "USDC", "address": "0x" + "1" * 40},
+                "dex": "Test DEX", "network": "eth",
+            }
+            fetch_pools.return_value = [
+                dict(base, pool_id="eth_missing", liquidity_usd=None),
+                dict(base, pool_id="eth_zero", liquidity_usd="0"),
+                dict(base, pool_id="eth_invalid", liquidity_usd="unknown"),
+                dict(base, pool_id="eth_low", liquidity_usd="100"),
+                dict(base, pool_id="eth_pass", liquidity_usd="50000"),
+            ]
+            cfg = {
+                "_root": directory, "_env": {"goplus_enabled": True},
+                "launches": {
+                    "networks": ["eth"], "quote_symbols": ["USDC"],
+                    "min_pool_age_minutes": 5, "max_pool_age_hours": 48,
+                    "min_liquidity_usd": 25000, "min_volume_24h_usd": 10000,
+                    "min_txns_24h": 50, "min_holder_count": 10,
+                    "max_security_checks_per_cycle": 0, "max_buy_sell_tax": 0.05,
+                    "seen_state_file": "data/seen.json", "review_state_file": "data/review.json",
+                },
+            }
+            scan_new_launches(cfg)
+            payload = json.loads(target.read_text(encoding="utf-8"))
+            self.assertEqual(len(payload["pools"]), 5)
+            self.assertEqual(payload["liquidity_classification_counts"], {
+                "below_minimum": 1, "missing": 1, "invalid": 1, "zero": 1, "passed": 1,
+            })
+            group = payload["network_dex_summary"]["eth|Test DEX"]
+            self.assertEqual(group["pools"], 5)
+            self.assertEqual(group["missing"], 1)
+            self.assertEqual(group["zero"], 1)
+            self.assertEqual(group["invalid"], 1)
+            self.assertEqual(group["below_minimum"], 1)
+            self.assertEqual(group["passed"], 1)
+            self.assertEqual(payload["pools"][0]["liquidity_raw_usd"], None)
+            self.assertEqual(payload["pools"][0]["market_filter_reason"], "liquidez ausente no fornecedor")
+
     def test_diagnostics_count_each_market_filter_and_security_limit(self, fetch_pools, _sleep):
         with tempfile.TemporaryDirectory() as directory:
             now = datetime.now(timezone.utc)
