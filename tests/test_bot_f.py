@@ -541,16 +541,13 @@ class BotFScreeningTests(unittest.TestCase):
 
     @patch("app.new_launches.time.sleep")
     @patch("app.new_launches.fetch_new_pools")
-    @patch("app.new_launches.POOL_DIAGNOSTICS_PATH")
     @patch("app.new_launches.time.sleep")
     @patch("app.new_launches.fetch_new_pools")
     def test_scan_persists_each_pool_and_grouped_liquidity_diagnostics(
-        self, fetch_pools, _sleep, diagnostics_path
+        self, fetch_pools, _sleep
     ):
         with tempfile.TemporaryDirectory() as directory:
-            diagnostics_path.__class__ = Path
             target = Path(directory) / "bot_f_pool_diagnostics.json"
-            diagnostics_path.return_value = target
             now = datetime.now(timezone.utc)
             base = {
                 "pool_address": "0x" + "f" * 40,
@@ -579,7 +576,8 @@ class BotFScreeningTests(unittest.TestCase):
                     "seen_state_file": "data/seen.json", "review_state_file": "data/review.json",
                 },
             }
-            scan_new_launches(cfg)
+            with patch("app.new_launches.POOL_DIAGNOSTICS_PATH", target):
+                scan_new_launches(cfg)
             payload = json.loads(target.read_text(encoding="utf-8"))
             self.assertEqual(len(payload["pools"]), 5)
             self.assertEqual(payload["liquidity_classification_counts"], {
