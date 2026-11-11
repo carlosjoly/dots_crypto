@@ -299,7 +299,11 @@ class BotFScreeningTests(unittest.TestCase):
                 },
             }
             alerts = scan_new_launches(cfg)
-            self.assertEqual(len(alerts), 1)
+            self.assertEqual(len(alerts), 2)
+            self.assertEqual(
+                {alert["discovery_status"] for alert in alerts},
+                {"ELEGÍVEL PARA WATCHLIST — NÃO É RECOMENDAÇÃO", "PENDENTE DE REVISÃO — NÃO APROVADO"},
+            )
             # Discovery continues across all networks even after the GoPlus cap is reached.
             self.assertEqual(fetch_pools.call_count, 2)
             self.assertEqual(goplus.call_count, 1)
