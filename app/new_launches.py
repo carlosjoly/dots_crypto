@@ -337,15 +337,26 @@ def _review_recheck_due(identity, review_state, now, interval_minutes=30):
 
 
 def release_seen_token(cfg, alert):
-    """Allow a failed Telegram delivery to be retried on the next scheduled cycle."""
+    """Release a failed alert for retry without losing pending-review state."""
     token_address = alert.get("token_address")
     chain_id = alert.get("chain_id")
     if not token_address or not chain_id:
         return
+    identity = f"{chain_id}:{str(token_address).lower()}"
     state_path = Path(cfg["_root"]) / cfg["launches"]["seen_state_file"]
     seen = _load_seen(state_path)
-    seen.discard(f"{chain_id}:{str(token_address).lower()}")
+    seen.discard(identity)
     _save_seen(state_path, seen)
+
+    if alert.get("discovery_status") == "PENDENTE DE REVISÃO — NÃO APROVADO":
+        review_path = Path(cfg["_root"]) / cfg["launches"].get(
+            "review_state_file", "data/bot_f_review_state.json"
+        )
+        review_state = _load_review_state(review_path)
+        record = review_state.get(identity)
+        if isinstance(record, dict):
+            record["discovery_alert_sent"] = False
+            _save_review_state(review_path, review_state)
 
 
 def _build_launch_alert(network, chain_id, token, pool, now, assessment,
