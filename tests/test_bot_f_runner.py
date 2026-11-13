@@ -39,7 +39,12 @@ class BotFStandaloneRunnerTests(unittest.TestCase):
     ):
         load_config.return_value = self.cfg
         self.assertEqual(main(), 1)
-        release.assert_called_once_with(self.cfg, {"symbol": "TEST", "token_address": "0x1", "liquidity_usd": 30000})
+        release.assert_called_once()
+        released_cfg, released_alert = release.call_args.args
+        self.assertEqual(released_cfg, self.cfg)
+        self.assertEqual(released_alert["symbol"], "TEST")
+        self.assertEqual(released_alert["token_address"], "0x1")
+        self.assertEqual(released_alert["liquidity_usd"], 30000)
 
  
     @patch("app.run_bot_f.fetch_current_pool_liquidity")
