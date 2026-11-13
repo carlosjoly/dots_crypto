@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import json
 import logging
+import math
 import random
 from pathlib import Path
 import re
@@ -203,6 +204,101 @@ def fetch_new_pools(network, page=1):
     log.info("Bot F coleta concluída: network_config=%s; gecko_slug=%s; pools_recebidos=%d.",
              network, gecko_network, len(pools))
     return pools
+
+def fetch_current_pool_liquidity(network, pool_address):
+    """Refresh the exact pool's reserve immediately before Telegram delivery."""
+    address = str(pool_address or "").strip()
+    if not re.fullmatch(r"0x[a-fA-F0-9]{40}", address):
+        raise ValueError("endereço do pool ausente ou inválido")
+    slug = gecko_network_id(network)
+    payload = _get_json(
+        f"{GECKO_BASE}/networks/{slug}/pools/{address}",
+        params=None,
+    )
+    data = payload.get("data") if isinstance(payload, dict) else None
+    attrs = data.get("attributes") if isinstance(data, dict) else None
+    if not isinstance(attrs, dict):
+        raise ValueError("GeckoTerminal não retornou atributos válidos para o pool")
+
+    # Fail closed unless the response itself identifies the exact requested pool.
+    returned_address = str(attrs.get("address") or "").strip()
+    if not re.fullmatch(r"0x[a-fA-F0-9]{40}", returned_address):
+        raise ValueError("GeckoTerminal não confirmou um endereço de pool válido na resposta")
+    if returned_address.lower() != address.lower():
+        raise ValueError("GeckoTerminal retornou um endereço diferente do pool solicitado")
+
+    resource_id = str(data.get("id") or "").strip()
+    if resource_id:
+        prefix = f"{slug}_"
+        resource_address = resource_id[len(prefix):] if resource_id.startswith(prefix) else ""
+        if (
+            not re.fullmatch(r"0x[a-fA-F0-9]{40}", resource_address)
+            or resource_address.lower() != address.lower()
+        ):
+            raise ValueError("ID do recurso GeckoTerminal não corresponde à rede/pool solicitados")
+
+    classification, liquidity = _classify_liquidity(attrs.get("reserve_in_usd"), 25000)
+    return {
+        "classification": classification,
+        "liquidity_usd": liquidity,
+        "provider": "GeckoTerminal",
+        "pool_address": returned_address.lower(),
+        "pool_id": resource_id or None,
+        "network_id": slug,
+    }
+
+
+def independent_lp_proof_is_valid(alert):
+    """Accept only a complete BSC/UNCX proof bound to this exact alert.
+
+    A dictionary containing plausible-looking fields is not enough: the proof
+    must identify the same network, chain and pool, the allowlisted PancakeSwap
+    V2 factory and UNCX locker, and a pinned block/runtime hash. Other networks
+    remain blocked until their own reviewed lock adapters are allowlisted.
+    """
+    proof = alert.get("independent_lp_proof")
+    if not isinstance(proof, dict) or proof.get("status") != "verified":
+        return False
+    try:
+        liquidity = float(proof.get("liquidity_usd"))
+        protected = float(proof.get("protected_fraction"))
+        block_number = int(proof.get("reserve_block_number"))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+    expected_pool = str(alert.get("pool_address") or "").lower()
+    proof_pool = str(proof.get("pool_address") or "").lower()
+    expected_chain = str(alert.get("chain_id") or "")
+    proof_chain = str(proof.get("chain_id") or "")
+    txs = proof.get("lock_transactions")
+    if not isinstance(txs, list) or not txs:
+        return False
+    if not all(
+        isinstance(item, dict)
+        and re.fullmatch(r"0x[a-fA-F0-9]{64}", str(item.get("transaction_hash") or ""))
+        for item in txs
+    ):
+        return False
+
+    return (
+        math.isfinite(liquidity)
+        and math.isfinite(protected)
+        and liquidity >= 25000
+        and protected >= 0.999
+        and alert.get("network") == "bsc"
+        and proof.get("network") == "bsc"
+        and expected_chain == "56"
+        and proof_chain == expected_chain
+        and re.fullmatch(r"0x[a-f0-9]{40}", expected_pool) is not None
+        and proof_pool == expected_pool
+        and str(proof.get("pool_factory") or "").lower() == "0xca143ce32fe78f1f7019d7d551a6402fc5350c73"
+        and str(proof.get("lock_contract") or "").lower() == "0xc765bddb93b0d1c1a88282ba0fa6b2d00e3e0c83"
+        and str(proof.get("source") or "") == "EVM_JSON_RPC"
+        and block_number > 0
+        and re.fullmatch(r"0x[a-fA-F0-9]{64}", str(proof.get("reserve_block_hash") or "")) is not None
+        and re.fullmatch(r"0x[a-fA-F0-9]{64}", str(proof.get("locker_runtime_code_hash") or "")) is not None
+    )
+
 
 def _number(value):
     try:
@@ -466,6 +562,7 @@ def _build_launch_alert(network, chain_id, token, pool, now, assessment,
         "pool_created_at_utc": created.isoformat() if created else None,
         "pool_url": _pool_url(network, pool),
         "pool_id": pool.get("pool_id"),
+        "pool_address": pool.get("pool_address"),
         "token_address": token["address"],
         "network": network,
         "chain_id": chain_id,
@@ -649,14 +746,10 @@ def scan_new_launches(cfg):
                         "flags": ["limite de consultas GoPlus do ciclo atingido; validação adiada"],
                         "notes": [],
                     }
-                    alerts.append(_build_launch_alert(
-                        network, chain_id, token, pool, now, deferred,
-                        pending=True, security_error="validação GoPlus adiada pelo limite por ciclo",
-                        market_reason=market_reason,
-                    ))
+                    # Pending candidates stay in internal review state only; never Telegram.
                     diagnostics["pending_discovery_alerts"] += 1
                     network_summary[network]["pending_alerts"] += 1
-                    review_state[identity]["discovery_alert_sent"] = True
+                    review_state[identity]["discovery_alert_sent"] = False
                 continue
 
             examined += 1
@@ -693,13 +786,10 @@ def scan_new_launches(cfg):
                 }
                 if not already_notified:
                     unknown = {"status": "goplus_unavailable", "flags": [error_reason], "notes": []}
-                    alerts.append(_build_launch_alert(
-                        network, chain_id, token, pool, now, unknown,
-                        pending=True, security_error=error_reason, market_reason=market_reason,
-                    ))
+                    # GoPlus errors remain visible in diagnostics/review state only.
                     diagnostics["pending_discovery_alerts"] += 1
                     network_summary[network]["pending_alerts"] += 1
-                    review_state[identity]["discovery_alert_sent"] = True
+                    review_state[identity]["discovery_alert_sent"] = False
                 continue
 
             flags = list(assessment.get("flags") or [])
@@ -737,13 +827,10 @@ def scan_new_launches(cfg):
                     network, token["address"], "; ".join(flags or ["dados insuficientes"]),
                 )
                 if not already_notified:
-                    alerts.append(_build_launch_alert(
-                        network, chain_id, token, pool, now, assessment,
-                        pending=True, market_reason=market_reason,
-                    ))
+                    # LP/holder evidence incomplete: retain internally, suppress Telegram.
                     diagnostics["pending_discovery_alerts"] += 1
                     network_summary[network]["pending_alerts"] += 1
-                    review_state[identity]["discovery_alert_sent"] = True
+                    review_state[identity]["discovery_alert_sent"] = False
                 continue
 
             diagnostics["goplus_approved"] += 1
