@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 import requests
 
-from app.new_launches import _get_json, _market_eligibility, _select_token, _pool_url, _load_seen, _save_seen, _load_review_state, _save_review_state, _review_recheck_due, release_seen_token, _holder_count_review_reason, _classify_liquidity, scan_new_launches
+from app.new_launches import _get_json, _market_eligibility, _select_token, _pool_url, _load_seen, _save_seen, _load_review_state, _save_review_state, _review_recheck_due, release_seen_token, _holder_count_review_reason, _classify_liquidity, fetch_current_pool_liquidity, scan_new_launches
 from app.security import evaluate_launch_security, get_goplus_access_token
 import hashlib
 from app.alerts import format_message
@@ -629,6 +629,59 @@ class BotFScreeningTests(unittest.TestCase):
             self.assertIn('"transactions": 1', diagnostic)
             self.assertIn('"security_limit_skipped": 1', diagnostic)
             self.assertIn('"market_eligible": 1', diagnostic)
+
+
+    @patch("app.new_launches._get_json")
+    def test_fresh_liquidity_accepts_only_exact_pool_identity(self, get_json):
+        address = "0x" + "a" * 40
+        get_json.return_value = {
+            "data": {
+                "id": "eth_" + address,
+                "attributes": {"address": address, "reserve_in_usd": "30000"},
+            }
+        }
+        result = fetch_current_pool_liquidity("eth", address)
+        self.assertEqual(result["classification"], "passed")
+        self.assertEqual(result["liquidity_usd"], 30000.0)
+        self.assertEqual(result["pool_address"], address)
+        self.assertEqual(result["pool_id"], "eth_" + address)
+        get_json.assert_called_once()
+
+    @patch("app.new_launches._get_json")
+    def test_fresh_liquidity_rejects_mismatched_returned_pool_address(self, get_json):
+        requested = "0x" + "a" * 40
+        returned = "0x" + "b" * 40
+        get_json.return_value = {
+            "data": {
+                "id": "eth_" + returned,
+                "attributes": {"address": returned, "reserve_in_usd": "500000"},
+            }
+        }
+        with self.assertRaisesRegex(ValueError, "endereço diferente"):
+            fetch_current_pool_liquidity("eth", requested)
+
+    @patch("app.new_launches._get_json")
+    def test_fresh_liquidity_rejects_mismatched_resource_id_even_if_attribute_matches(self, get_json):
+        address = "0x" + "a" * 40
+        other = "0x" + "c" * 40
+        get_json.return_value = {
+            "data": {
+                "id": "eth_" + other,
+                "attributes": {"address": address, "reserve_in_usd": "500000"},
+            }
+        }
+        with self.assertRaisesRegex(ValueError, "ID do recurso"):
+            fetch_current_pool_liquidity("eth", address)
+
+    @patch("app.new_launches._get_json")
+    def test_fresh_liquidity_rejects_missing_pool_identity(self, get_json):
+        address = "0x" + "a" * 40
+        get_json.return_value = {
+            "data": {"id": "eth_" + address, "attributes": {"reserve_in_usd": "500000"}}
+        }
+        with self.assertRaisesRegex(ValueError, "não confirmou"):
+            fetch_current_pool_liquidity("eth", address)
+
 
 
 if __name__ == "__main__":
