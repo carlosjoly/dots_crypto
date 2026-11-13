@@ -77,9 +77,25 @@ def diagnose_pool(rpc, pool, block):
         token1 = read_address(rpc, pool, "token1()", block)
         result.update({"factory": factory, "token0": token0, "token1": token1})
         result["pancakeswap_v2_factory_match"] = factory.lower() == PANCAKE_FACTORY
-        result["factory_pair"] = read_address(
-            rpc, factory, "getPair(address,address)" if False else "factory()", block
-        ) if False else None
+        pair_selector = selector(rpc, "getPair(address,address)")
+        pair_data = pair_selector + addr_arg(token0) + addr_arg(token1)
+        result["factory_pair"] = "0x" + eth_call(rpc, factory, pair_data, block)[-40:]
+        result["factory_pair_matches_pool"] = result["factory_pair"].lower() == pool.lower()
+        count_data = eth_call(
+            rpc, LOCKER,
+            selector(rpc, "getNumLocksForToken(address)") + addr_arg(pool),
+            block,
+        )
+        result["getNumLocksForToken_raw"] = count_data
+        result["getNumLocksForToken_count"] = int(count_data, 16)
+        if int(count_data, 16) > 0:
+            token_locks_data = eth_call(
+                rpc, LOCKER,
+                selector(rpc, "tokenLocks(address,uint256)") + addr_arg(pool) + word(0),
+                block,
+            )
+            result["tokenLocks_index0_raw"] = token_locks_data
+            result["tokenLocks_index0_return_bytes"] = max(0, (len(token_locks_data) - 2) // 2)
         reserves = eth_call(rpc, pool, "0x0902f1ac", block)
         if not isinstance(reserves, str) or len(reserves) < 194:
             raise RuntimeError("getReserves returned malformed data")
@@ -142,13 +158,6 @@ def main():
                 rpc, "onRelock(uint256,address,address,uint256,uint256,uint256)"
             ),
         }
-        count_data = eth_call(
-            rpc, LOCKER, out["selectors"]["getNumLocksForToken(address)"] + addr_arg(args.pool[0])
-            if args.pool else out["selectors"]["getNumLocksForToken(address)"] + addr_arg("0x" + "0" * 40),
-            block_tag,
-        )
-        out["getNumLocksForToken_probe_raw"] = count_data
-        out["getNumLocksForToken_probe_count"] = int(count_data, 16) if count_data else None
         if args.pool:
             out["pools"] = [diagnose_pool(rpc, pool, block_tag) for pool in args.pool]
         out["warning"] = (
