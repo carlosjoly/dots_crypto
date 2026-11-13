@@ -698,6 +698,7 @@ class IndependentLpProofIdentityTests(unittest.TestCase):
                 "pool_address": "0x" + "a" * 40,
                 "pool_factory": "0xca143ce32fe78f1f7019d7d551a6402fc5350c73",
                 "lock_contract": "0xc765bddb93b0d1c1a88282ba0fa6b2d00e3e0c83",
+                "locker_factory": "0xca143ce32fe78f1f7019d7d551a6402fc5350c73",
                 "liquidity_usd": 30000,
                 "protected_fraction": 0.9995,
                 "reserve_block_number": 123456,
@@ -726,6 +727,9 @@ class IndependentLpProofIdentityTests(unittest.TestCase):
         self.assertFalse(independent_lp_proof_is_valid(self.alert))
         self.alert["independent_lp_proof"]["lock_contract"] = "0xc765bddb93b0d1c1a88282ba0fa6b2d00e3e0c83"
         self.alert["independent_lp_proof"]["pool_factory"] = "0x" + "e" * 40
+        self.assertFalse(independent_lp_proof_is_valid(self.alert))
+        self.alert["independent_lp_proof"]["pool_factory"] = "0xca143ce32fe78f1f7019d7d551a6402fc5350c73"
+        self.alert["independent_lp_proof"]["locker_factory"] = "0x" + "e" * 40
         self.assertFalse(independent_lp_proof_is_valid(self.alert))
 
     def test_rejects_missing_block_hash_runtime_hash_or_transaction_evidence(self):
