@@ -4,7 +4,10 @@ import logging
 from .alerts import emit_alert
 from .config import load_config
 from .logging_setup import setup_logging
-from .new_launches import release_seen_token, scan_new_launches
+from .new_launches import (
+    release_seen_token, scan_new_launches, fetch_current_pool_liquidity,
+    independent_lp_proof_is_valid,
+)
 
 log = logging.getLogger("dot_cripto.bot_f.runner")
 
@@ -27,6 +30,21 @@ def main():
     delivery_errors = 0
     for alert in alerts:
         try:
+            fresh = fetch_current_pool_liquidity(alert.get("network"), alert.get("pool_address"))
+            if fresh["classification"] != "passed":
+                log.warning(
+                    "Bot F Telegram bloqueado: liquidez atual %s (%s) para %s; mínimo US$ 25.000.",
+                    fresh["classification"], fresh.get("liquidity_usd"),
+                    alert.get("pool_id", alert.get("symbol", "N/D")),
+                )
+                continue
+            if not independent_lp_proof_is_valid(alert):
+                log.warning(
+                    "Bot F Telegram bloqueado: sem prova independente on-chain de reservas e bloqueio LP para %s.",
+                    alert.get("pool_id", alert.get("symbol", "N/D")),
+                )
+                continue
+            alert["liquidity_usd"] = fresh["liquidity_usd"]
             emit_alert(cfg, alert)
             processed += 1
             log.info(

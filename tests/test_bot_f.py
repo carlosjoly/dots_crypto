@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 import requests
 
-from app.new_launches import _get_json, _market_eligibility, _select_token, _pool_url, _load_seen, _save_seen, _load_review_state, _save_review_state, _review_recheck_due, release_seen_token, _holder_count_review_reason, _classify_liquidity, scan_new_launches
+from app.new_launches import _get_json, _market_eligibility, _select_token, _pool_url, _load_seen, _save_seen, _load_review_state, _save_review_state, _review_recheck_due, release_seen_token, _holder_count_review_reason, _classify_liquidity, fetch_current_pool_liquidity, scan_new_launches
 from app.security import evaluate_launch_security, get_goplus_access_token
 import hashlib
 from app.alerts import format_message
@@ -310,10 +310,10 @@ class BotFScreeningTests(unittest.TestCase):
                 },
             }
             alerts = scan_new_launches(cfg)
-            self.assertEqual(len(alerts), 2)
+            self.assertEqual(len(alerts), 1)
             self.assertEqual(
                 {alert["discovery_status"] for alert in alerts},
-                {"ELEGÍVEL PARA WATCHLIST — NÃO É RECOMENDAÇÃO", "PENDENTE DE REVISÃO — NÃO APROVADO"},
+                {"ELEGÍVEL PARA WATCHLIST — NÃO É RECOMENDAÇÃO"},
             )
             # Discovery continues across all networks even after the GoPlus cap is reached.
             self.assertEqual(fetch_pools.call_count, 2)
@@ -526,14 +526,11 @@ class BotFScreeningTests(unittest.TestCase):
                 },
             }
             alerts = scan_new_launches(cfg)
-            self.assertEqual(len(alerts), 1)
-            self.assertEqual(alerts[0]["discovery_status"], "PENDENTE DE REVISÃO — NÃO APROVADO")
-            self.assertEqual(alerts[0]["goplus_status"], "review_required")
-            self.assertIn("NÃO É ELEGÍVEL", alerts[0]["risk_note"])
+            self.assertEqual(alerts, [])
             self.assertEqual(_load_seen(Path(directory) / "data/seen.json"), set())
             identity = "1:" + address
             state = _load_review_state(Path(directory) / "data/review.json")
-            self.assertTrue(state[identity]["discovery_alert_sent"])
+            self.assertFalse(state[identity]["discovery_alert_sent"])
 
             # Same token is not spammed every 15-minute scan while in review cooldown.
             self.assertEqual(scan_new_launches(cfg), [])
@@ -624,9 +621,7 @@ class BotFScreeningTests(unittest.TestCase):
             }
             with self.assertLogs("dot_cripto.bot_f", level="INFO") as captured:
                 alerts = scan_new_launches(cfg)
-            self.assertEqual(len(alerts), 1)
-            self.assertEqual(alerts[0]["discovery_status"], "PENDENTE DE REVISÃO — NÃO APROVADO")
-            self.assertEqual(alerts[0]["goplus_status"], "security_check_deferred")
+            self.assertEqual(alerts, [])
             diagnostic = next(line for line in captured.output if "Bot F diagnóstico ciclo:" in line)
             self.assertIn('"age": 1', diagnostic)
             self.assertIn('"liquidity": 1', diagnostic)
@@ -634,6 +629,59 @@ class BotFScreeningTests(unittest.TestCase):
             self.assertIn('"transactions": 1', diagnostic)
             self.assertIn('"security_limit_skipped": 1', diagnostic)
             self.assertIn('"market_eligible": 1', diagnostic)
+
+
+    @patch("app.new_launches._get_json")
+    def test_fresh_liquidity_accepts_only_exact_pool_identity(self, get_json):
+        address = "0x" + "a" * 40
+        get_json.return_value = {
+            "data": {
+                "id": "eth_" + address,
+                "attributes": {"address": address, "reserve_in_usd": "30000"},
+            }
+        }
+        result = fetch_current_pool_liquidity("eth", address)
+        self.assertEqual(result["classification"], "passed")
+        self.assertEqual(result["liquidity_usd"], 30000.0)
+        self.assertEqual(result["pool_address"], address)
+        self.assertEqual(result["pool_id"], "eth_" + address)
+        get_json.assert_called_once()
+
+    @patch("app.new_launches._get_json")
+    def test_fresh_liquidity_rejects_mismatched_returned_pool_address(self, get_json):
+        requested = "0x" + "a" * 40
+        returned = "0x" + "b" * 40
+        get_json.return_value = {
+            "data": {
+                "id": "eth_" + returned,
+                "attributes": {"address": returned, "reserve_in_usd": "500000"},
+            }
+        }
+        with self.assertRaisesRegex(ValueError, "endereço diferente"):
+            fetch_current_pool_liquidity("eth", requested)
+
+    @patch("app.new_launches._get_json")
+    def test_fresh_liquidity_rejects_mismatched_resource_id_even_if_attribute_matches(self, get_json):
+        address = "0x" + "a" * 40
+        other = "0x" + "c" * 40
+        get_json.return_value = {
+            "data": {
+                "id": "eth_" + other,
+                "attributes": {"address": address, "reserve_in_usd": "500000"},
+            }
+        }
+        with self.assertRaisesRegex(ValueError, "ID do recurso"):
+            fetch_current_pool_liquidity("eth", address)
+
+    @patch("app.new_launches._get_json")
+    def test_fresh_liquidity_rejects_missing_pool_identity(self, get_json):
+        address = "0x" + "a" * 40
+        get_json.return_value = {
+            "data": {"id": "eth_" + address, "attributes": {"reserve_in_usd": "500000"}}
+        }
+        with self.assertRaisesRegex(ValueError, "não confirmou"):
+            fetch_current_pool_liquidity("eth", address)
+
 
 
 if __name__ == "__main__":
