@@ -4,7 +4,10 @@ import logging
 from .alerts import emit_alert
 from .config import load_config
 from .logging_setup import setup_logging
-from .new_launches import (\n    release_seen_token, scan_new_launches, fetch_current_pool_liquidity,\n    independent_lp_proof_is_valid,\n)
+from .new_launches import (
+    release_seen_token, scan_new_launches, fetch_current_pool_liquidity,
+    independent_lp_proof_is_valid,
+)
 
 log = logging.getLogger("dot_cripto.bot_f.runner")
 
