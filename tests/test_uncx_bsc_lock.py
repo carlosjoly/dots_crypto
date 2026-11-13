@@ -36,13 +36,16 @@ def address_word(value):
 class FakeRpc:
     def __init__(self, chain="0x38", pair_factory=PANCAKE_V2_FACTORY,
                  locker_factory=PANCAKE_V2_FACTORY, amount=1000000,
-                 unlock=1900000000, locker_code=LOCKER_CODE):
+                 unlock=1900000000, locker_code=LOCKER_CODE,
+                 receipt_status="0x1", omit_deposit=False):
         self.chain = chain
         self.pair_factory = pair_factory
         self.locker_factory = locker_factory
         self.amount = amount
         self.unlock = unlock
         self.locker_code = locker_code
+        self.receipt_status = receipt_status
+        self.omit_deposit = omit_deposit
         self.calls = []
 
     def call(self, method, params):
@@ -61,6 +64,34 @@ class FakeRpc:
             signature = bytes.fromhex(raw[2:]).decode("ascii")
             selector = SELECTORS.get(signature, "abcdef01")
             return "0x" + selector + "0" * 56
+        if method == "eth_getLogs":
+            if self.omit_deposit:
+                return []
+            event_topic = "0xabcdef01" + "0" * 56
+            event_data = "0x" + address_word(POOL)[2:] + address_word(OWNER)[2:] + word(1000000) + word(1700000000) + word(1900000000)
+            from_block = int(params[0]["fromBlock"], 16)
+            to_block = int(params[0]["toBlock"], 16)
+            if from_block <= 0x120 <= to_block and params[0]["topics"] == [event_topic]:
+                return [{
+                    "address": UNCX_BSC_PANCAKE_V2_LOCKER,
+                    "topics": [event_topic],
+                    "data": event_data,
+                    "transactionHash": "0x" + "2" * 64,
+                    "blockNumber": "0x120",
+                }]
+            return []
+        if method == "eth_getTransactionReceipt":
+            event_topic = "0xabcdef01" + "0" * 56
+            event_data = "0x" + address_word(POOL)[2:] + address_word(OWNER)[2:] + word(1000000) + word(1700000000) + word(1900000000)
+            return {
+                "status": self.receipt_status,
+                "blockNumber": "0x120",
+                "logs": [{
+                    "address": UNCX_BSC_PANCAKE_V2_LOCKER,
+                    "topics": [event_topic],
+                    "data": event_data,
+                }],
+            }
         if method == "eth_call":
             to = params[0]["to"].lower()
             data = params[0]["data"]
@@ -95,12 +126,12 @@ class UncxBscLockTests(unittest.TestCase):
                 POOL, FakeRpc(), expected_locker_code_hash=CODE_HASH,
                 audit_path=Path(tmp) / "audit.jsonl", block_number=0x123,
             )
-            self.assertEqual(result["status"], "lock_verified_storage_only")
+            self.assertEqual(result["status"], "lock_verified_transaction_linked")
             self.assertEqual(result["protected_fraction"], 1.0)
             self.assertEqual(result["lock_records_active"], 1)
             self.assertEqual(result["reserve_block_number"], 0x123)
             saved = json.loads((Path(tmp) / "audit.jsonl").read_text().splitlines()[0])
-            self.assertEqual(saved["status"], "lock_verified_storage_only")
+            self.assertEqual(saved["status"], "lock_verified_transaction_linked")
 
     def test_missing_runtime_hash_pin_fails_closed(self):
         result = verify_uncx_bsc_pancakeswap_v2_lock(POOL, FakeRpc())
@@ -143,16 +174,41 @@ class UncxBscLockTests(unittest.TestCase):
         self.assertEqual(result["status"], "blocked")
         self.assertIn("inferior a 99,9%", result["reason"])
 
-    def test_combined_proof_never_approves_without_transaction_hash(self):
+    def test_combined_proof_approves_only_with_transaction_receipt_and_fresh_liquidity(self):
         with tempfile.TemporaryDirectory() as tmp:
             rpc = FakeRpc()
             result = build_bsc_pancakeswap_v2_lp_proof(
                 POOL, rpc, expected_locker_code_hash=CODE_HASH,
+                audit_path=Path(tmp) / "audit.jsonl", liquidity_usd=30000,
+            )
+            self.assertEqual(result["status"], "verified")
+            self.assertEqual(result["liquidity_usd"], 30000)
+            self.assertTrue(result["lock_transaction"])
+            self.assertEqual(result["lock_evidence_type"], "UNCX_V2_storage_balance_event_and_receipt")
+
+
+    def test_missing_deposit_event_fails_closed(self):
+        result = verify_uncx_bsc_pancakeswap_v2_lock(
+            POOL, FakeRpc(omit_deposit=True), expected_locker_code_hash=CODE_HASH,
+        )
+        self.assertEqual(result["status"], "blocked")
+        self.assertIn("evento onDeposit único", result["reason"])
+
+    def test_failed_transaction_receipt_fails_closed(self):
+        result = verify_uncx_bsc_pancakeswap_v2_lock(
+            POOL, FakeRpc(receipt_status="0x0"), expected_locker_code_hash=CODE_HASH,
+        )
+        self.assertEqual(result["status"], "blocked")
+        self.assertIn("recibo", result["reason"])
+
+    def test_missing_fresh_liquidity_keeps_combined_proof_blocked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = build_bsc_pancakeswap_v2_lp_proof(
+                POOL, FakeRpc(), expected_locker_code_hash=CODE_HASH,
                 audit_path=Path(tmp) / "audit.jsonl",
             )
-            self.assertEqual(result["status"], "reserve_verified_lock_unverified")
-            self.assertIn("hash da transação", result["reason"])
-            self.assertNotIn("lock_transaction", result)
+        self.assertEqual(result["status"], "reserve_verified_lock_unverified")
+        self.assertIn("liquidez fresca", result["reason"])
 
     def test_lock_reads_are_pinned_to_pool_snapshot_block(self):
         rpc = FakeRpc()
