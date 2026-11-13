@@ -41,7 +41,6 @@ class BotFStandaloneRunnerTests(unittest.TestCase):
         self.assertEqual(main(), 1)
         release.assert_called_once_with(self.cfg, {"symbol": "TEST", "token_address": "0x1"})
 
-    @patch("app.run_bot_f.fetch_current_pool_liquidity", return_value={"classification": "passed", "liquidity_usd": 30000})
     @patch("app.run_bot_f.scan_new_launches", side_effect=RuntimeError("provider unavailable"))
     @patch("app.run_bot_f.setup_logging")
     @patch("app.run_bot_f.load_config")
