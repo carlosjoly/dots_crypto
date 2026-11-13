@@ -184,6 +184,8 @@ class UncxBscLockTests(unittest.TestCase):
             self.assertEqual(result["status"], "verified")
             self.assertEqual(result["liquidity_usd"], 30000)
             self.assertTrue(result["lock_transaction"])
+            self.assertEqual(result["pool_factory"], PANCAKE_V2_FACTORY)
+            self.assertEqual(result["locker_factory"], PANCAKE_V2_FACTORY)
             self.assertEqual(result["lock_evidence_type"], "UNCX_V2_storage_balance_event_and_receipt")
 
 
