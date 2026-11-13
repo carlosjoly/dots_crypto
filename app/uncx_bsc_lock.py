@@ -50,6 +50,7 @@ def verify_uncx_bsc_pancakeswap_v2_lock(
     expected_locker_code_hash=None,
     audit_path=None,
     max_lock_records=DEFAULT_MAX_LOCK_RECORDS,
+    block_number=None,
 ):
     """Verify current UNCX lock records and actual LP-token custody at one pinned block.
 
@@ -76,7 +77,8 @@ def verify_uncx_bsc_pancakeswap_v2_lock(
         chain_id = int(rpc.call("eth_chainId", []), 16)
         if chain_id != BSC_CHAIN_ID:
             raise VerificationError("RPC não está na BNB Smart Chain (chainId 56)")
-        block = rpc.call("eth_getBlockByNumber", ["latest", False])
+        requested_tag = hex(int(block_number)) if block_number is not None else "latest"
+        block = rpc.call("eth_getBlockByNumber", [requested_tag, False])
         if not isinstance(block, dict) or not block.get("number") or not block.get("hash"):
             raise VerificationError("bloco latest sem número/hash")
         block_number = int(block["number"], 16)
@@ -137,7 +139,7 @@ def verify_uncx_bsc_pancakeswap_v2_lock(
         if not active_records:
             raise VerificationError("nenhum lock ativo com prazo futuro")
         record.update({
-            "status": "lock_verified",
+            "status": "lock_verified_storage_only",
             "reason": None,
             "chain_id": str(chain_id),
             "pool_factory": pool_factory,
@@ -178,8 +180,9 @@ def build_bsc_pancakeswap_v2_lp_proof(pool_address, rpc, allowed_factories=None,
         return snapshot
     lock = verify_uncx_bsc_pancakeswap_v2_lock(
         pool_address, rpc, expected_locker_code_hash, audit_path,
+        block_number=snapshot.get("reserve_block_number"),
     )
-    if lock.get("status") != "lock_verified":
+    if lock.get("status") != "lock_verified_storage_only":
         snapshot["reason"] = lock.get("reason") or "lock UNCX não verificado"
         snapshot["lock_verification"] = lock
         _audit(snapshot, audit_path)
@@ -192,11 +195,10 @@ def build_bsc_pancakeswap_v2_lp_proof(pool_address, rpc, allowed_factories=None,
         _audit(snapshot, audit_path)
         return snapshot
     snapshot.update({
-        "status": "verified",
-        "reason": None,
+        "status": "reserve_verified_lock_unverified",
+        "reason": "registos e custódia LP confirmados; hash da transação de lock ainda não comprovado",
         "lock_contract": lock["lock_contract"],
         "lock_records": lock["lock_records"],
-        "lock_transaction": None,
         "lock_evidence_type": "UNCX_V2_onchain_storage_and_balance",
         "protected_fraction": lock["protected_fraction"],
         "locked_lp_raw": lock["locked_lp_active_raw"],
