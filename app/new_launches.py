@@ -284,7 +284,7 @@ def independent_lp_proof_is_valid(alert):
         math.isfinite(liquidity)
         and math.isfinite(protected)
         and liquidity >= 25000
-        and protected >= 0.999
+        and 0.999 <= protected <= 1.0
         and alert.get("network") == "bsc"
         and proof.get("network") == "bsc"
         and expected_chain == "56"
@@ -292,6 +292,7 @@ def independent_lp_proof_is_valid(alert):
         and re.fullmatch(r"0x[a-f0-9]{40}", expected_pool) is not None
         and proof_pool == expected_pool
         and str(proof.get("pool_factory") or "").lower() == "0xca143ce32fe78f1f7019d7d551a6402fc5350c73"
+        and str(proof.get("locker_factory") or "").lower() == "0xca143ce32fe78f1f7019d7d551a6402fc5350c73"
         and str(proof.get("lock_contract") or "").lower() == "0xc765bddb93b0d1c1a88282ba0fa6b2d00e3e0c83"
         and str(proof.get("source") or "") == "EVM_JSON_RPC"
         and block_number > 0
