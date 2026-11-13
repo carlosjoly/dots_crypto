@@ -24,3 +24,6 @@ Os selectors são derivados com `web3_sha3` do próprio nó RPC; se esse método
 O adaptador confirma armazenamento do registro e custódia LP, mas ainda não associa cada registro ao hash da transação original de lock. O contrato publica evento `onDeposit`, mas este primeiro corte não percorre o histórico de logs para estabelecer essa associação. Assim, o resultado é `lock_verified_storage_only` e o comprovante combinado permanece `reserve_verified_lock_unverified`; nunca retorna `status=verified` e não satisfaz o gate Telegram atual.
 
 Também não está ligado ao runner Bot F. Nenhuma rede/DEX além desta combinação é autorizada. Os testes usam RPC simulado; antes de integração operacional, é necessária validação em RPC BSC real, revisão do hash de runtime e implementação/teste de vínculo transacional.
+
+## Status de entrega
+Este adaptador não é chamado pelo runner e não deve ser usado para construir um comprovante elegível ao Telegram até existir vínculo verificável com a transação de lock e validação operacional do deployment.
