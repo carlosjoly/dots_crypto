@@ -44,6 +44,102 @@ def _tuple_call(rpc, target, signature, args, block_tag, words=6):
     return [_word(raw, i) for i in range(words - 1)] + [_address("0x" + raw[2 + (words - 1) * 64:2 + words * 64])]
 
 
+
+def _deposit_event_topic(rpc):
+    signature = "onDeposit(address,address,uint256,uint256,uint256)"
+    topic = rpc.call("web3_sha3", ["0x" + signature.encode("ascii").hex()])
+    if not isinstance(topic, str) or not re.fullmatch(r"0x[a-fA-F0-9]{64}", topic):
+        raise VerificationError("não foi possível derivar o tópico do evento onDeposit")
+    return topic.lower()
+
+
+def _decode_deposit_log(log):
+    data = str(log.get("data") or "")
+    if not data.startswith("0x") or len(data) != 2 + 5 * 64:
+        raise VerificationError("dados do evento onDeposit inválidos")
+    return {
+        "lp_token": _address("0x" + data[2:66]),
+        "owner": _address("0x" + data[66:130]),
+        "amount": int(data[130:194], 16),
+        "lock_date": int(data[194:258], 16),
+        "unlock_date": int(data[258:322], 16),
+    }
+
+
+def _find_deposit_transactions(rpc, pool_address, records, block_number, lookback_blocks):
+    """Link every active storage record to a successful onDeposit receipt."""
+    if int(lookback_blocks) < 1 or int(lookback_blocks) > 100000:
+        raise VerificationError("lookback de eventos fora do intervalo permitido")
+    topic = _deposit_event_topic(rpc)
+    start = max(0, int(block_number) - int(lookback_blocks))
+    end = int(block_number)
+    logs = []
+    chunk_size = 5000
+    cursor = start
+    while cursor <= end:
+        chunk_end = min(end, cursor + chunk_size - 1)
+        batch = rpc.call("eth_getLogs", [{
+            "address": UNCX_BSC_PANCAKE_V2_LOCKER,
+            "fromBlock": hex(cursor),
+            "toBlock": hex(chunk_end),
+            "topics": [topic],
+        }])
+        if not isinstance(batch, list):
+            raise VerificationError("eth_getLogs retornou formato inválido")
+        logs.extend(batch)
+        cursor = chunk_end + 1
+
+    linked = []
+    used = set()
+    for record in records:
+        matches = []
+        for log in logs:
+            if str(log.get("address", "")).lower() != UNCX_BSC_PANCAKE_V2_LOCKER:
+                continue
+            topics = log.get("topics") or []
+            if not topics or str(topics[0]).lower() != topic:
+                continue
+            decoded = _decode_deposit_log(log)
+            if (
+                decoded["lp_token"] == pool_address.lower()
+                and decoded["owner"] == record["owner"].lower()
+                and decoded["amount"] == int(record["initial_amount_raw"])
+                and decoded["lock_date"] == int(record["lock_date"])
+            ):
+                matches.append((log, decoded))
+        if len(matches) != 1:
+            raise VerificationError("registro LP não possui evento onDeposit único correspondente")
+        log, decoded = matches[0]
+        tx_hash = str(log.get("transactionHash") or "").lower()
+        if not re.fullmatch(r"0x[a-f0-9]{64}", tx_hash) or tx_hash in used:
+            raise VerificationError("hash de transação ausente, inválido ou ambíguo")
+        receipt = rpc.call("eth_getTransactionReceipt", [tx_hash])
+        if not isinstance(receipt, dict) or receipt.get("status") != "0x1":
+            raise VerificationError("recibo da transação de lock ausente ou malsucedido")
+        if str(receipt.get("blockNumber", "")).lower() != str(log.get("blockNumber", "")).lower():
+            raise VerificationError("bloco do recibo não corresponde ao evento de lock")
+        receipt_logs = receipt.get("logs") or []
+        exact = any(
+            str(item.get("address", "")).lower() == UNCX_BSC_PANCAKE_V2_LOCKER
+            and (item.get("topics") or [""])[0].lower() == topic
+            and str(item.get("data", "")).lower() == str(log.get("data", "")).lower()
+            for item in receipt_logs
+        )
+        if not exact:
+            raise VerificationError("recibo não contém o evento onDeposit correspondente")
+        used.add(tx_hash)
+        linked.append({
+            "transaction_hash": tx_hash,
+            "event_block_number": int(str(log["blockNumber"]), 16),
+            "lp_token": decoded["lp_token"],
+            "owner": decoded["owner"],
+            "amount_raw": str(decoded["amount"]),
+            "lock_date": decoded["lock_date"],
+            "event_unlock_date": decoded["unlock_date"],
+            "lock_id": record["lock_id"],
+        })
+    return linked
+
 def verify_uncx_bsc_pancakeswap_v2_lock(
     pool_address,
     rpc,
@@ -51,6 +147,7 @@ def verify_uncx_bsc_pancakeswap_v2_lock(
     audit_path=None,
     max_lock_records=DEFAULT_MAX_LOCK_RECORDS,
     block_number=None,
+    lookback_blocks=50000,
 ):
     """Verify current UNCX lock records and actual LP-token custody at one pinned block.
 
@@ -138,8 +235,11 @@ def verify_uncx_bsc_pancakeswap_v2_lock(
             raise VerificationError("fração LP com lock ativo inferior a 99,9%")
         if not active_records:
             raise VerificationError("nenhum lock ativo com prazo futuro")
+        lock_transactions = _find_deposit_transactions(
+            rpc, pool_address, active_records, block_number, lookback_blocks
+        )
         record.update({
-            "status": "lock_verified_storage_only",
+            "status": "lock_verified_transaction_linked",
             "reason": None,
             "chain_id": str(chain_id),
             "pool_factory": pool_factory,
@@ -155,6 +255,8 @@ def verify_uncx_bsc_pancakeswap_v2_lock(
             "lock_records_total": count,
             "lock_records_active": len(active_records),
             "lock_records": all_records,
+            "lock_transactions": lock_transactions,
+            "lock_transaction": lock_transactions[0]["transaction_hash"] if len(lock_transactions) == 1 else [x["transaction_hash"] for x in lock_transactions],
             "lock_contract": UNCX_BSC_PANCAKE_V2_LOCKER,
         })
     except Exception as exc:
@@ -169,7 +271,8 @@ def verify_uncx_bsc_pancakeswap_v2_lock(
 
 
 def build_bsc_pancakeswap_v2_lp_proof(pool_address, rpc, allowed_factories=None,
-                                      expected_locker_code_hash=None, audit_path=None):
+                                      expected_locker_code_hash=None, audit_path=None,
+                                      liquidity_usd=None):
     """Combine independent pool/reserve proof with the specific UNCX LP lock."""
     snapshot = verify_v2_pool_reserves(
         "bsc", pool_address,
@@ -182,7 +285,7 @@ def build_bsc_pancakeswap_v2_lp_proof(pool_address, rpc, allowed_factories=None,
         pool_address, rpc, expected_locker_code_hash, audit_path,
         block_number=snapshot.get("reserve_block_number"),
     )
-    if lock.get("status") != "lock_verified_storage_only":
+    if lock.get("status") != "lock_verified_transaction_linked":
         snapshot["reason"] = lock.get("reason") or "lock UNCX não verificado"
         snapshot["lock_verification"] = lock
         _audit(snapshot, audit_path)
@@ -194,16 +297,28 @@ def build_bsc_pancakeswap_v2_lp_proof(pool_address, rpc, allowed_factories=None,
         snapshot["lock_verification"] = lock
         _audit(snapshot, audit_path)
         return snapshot
+    try:
+        fresh_liquidity = float(liquidity_usd)
+    except (TypeError, ValueError, OverflowError):
+        fresh_liquidity = 0.0
+    if fresh_liquidity < 25000:
+        snapshot["reason"] = "liquidez fresca ausente ou inferior a US$ 25.000"
+        snapshot["lock_verification"] = lock
+        _audit(snapshot, audit_path)
+        return snapshot
     snapshot.update({
-        "status": "reserve_verified_lock_unverified",
-        "reason": "registos e custódia LP confirmados; hash da transação de lock ainda não comprovado",
+        "status": "verified",
+        "reason": None,
         "lock_contract": lock["lock_contract"],
         "lock_records": lock["lock_records"],
-        "lock_evidence_type": "UNCX_V2_onchain_storage_and_balance",
+        "lock_transactions": lock["lock_transactions"],
+        "lock_transaction": lock["lock_transaction"],
+        "lock_evidence_type": "UNCX_V2_storage_balance_event_and_receipt",
         "protected_fraction": lock["protected_fraction"],
         "locked_lp_raw": lock["locked_lp_active_raw"],
         "locker_lp_balance_raw": lock["locker_lp_balance_raw"],
         "locker_runtime_code_hash": lock["locker_runtime_code_hash"],
+        "liquidity_usd": fresh_liquidity,
     })
     _audit(snapshot, audit_path)
     return snapshot
