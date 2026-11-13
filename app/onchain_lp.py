@@ -157,40 +157,16 @@ def verify_v2_pool_reserves(network, pool_address, allowed_factories=(),
 
 
 def build_independent_lp_proof(network, pool_address, allowed_factories=(),
-                               lock_adapter=None, rpc_url=None, audit_path=None, rpc=None):
-    """Only a chain/DEX-specific lock adapter can elevate a reserve snapshot."""
-    snapshot = verify_v2_pool_reserves(network, pool_address, allowed_factories,
-                                       rpc_url, audit_path, rpc)
-    if snapshot["status"] != "reserve_verified_lock_unverified":
-        return snapshot
-    if lock_adapter is None:
-        snapshot["reason"] = "sem adaptador de lock auditado para esta rede/DEX"
+                               rpc_url=None, audit_path=None, rpc=None):
+    """Return reserve evidence only; no trusted LP-lock adapter is registered yet.
+
+    This function intentionally cannot emit status=verified. Add a concrete,
+    reviewed network/DEX lock adapter before changing this behavior.
+    """
+    snapshot = verify_v2_pool_reserves(
+        network, pool_address, allowed_factories, rpc_url, audit_path, rpc
+    )
+    if snapshot["status"] == "reserve_verified_lock_unverified":
+        snapshot["reason"] = "sem adaptador de lock auditado/allowlisted para esta rede/DEX"
         _audit(snapshot, audit_path)
-        return snapshot
-    try:
-        client = rpc or JsonRpc(rpc_url or os.getenv(CHAINS[network][1], ""))
-        evidence = lock_adapter(snapshot, client)
-        required = ("lock_contract", "lock_transaction", "lock_block_number",
-                    "unlock_timestamp", "locked_lp_raw", "lock_record_id")
-        if not isinstance(evidence, dict) or any(evidence.get(k) in (None, "") for k in required):
-            raise VerificationError("adaptador não forneceu todos os campos de lock")
-        if evidence.get("lock_record_verified") is not True:
-            raise VerificationError("registro de lock não verificado pelo adaptador")
-        if not ADDRESS.fullmatch(str(evidence["lock_contract"])):
-            raise VerificationError("contrato de lock inválido")
-        if not re.fullmatch(r"0x[a-fA-F0-9]{64}", str(evidence["lock_transaction"])):
-            raise VerificationError("hash da transação de lock inválido")
-        locked, supply = int(evidence["locked_lp_raw"]), int(snapshot["lp_total_supply_raw"])
-        unlock = int(evidence["unlock_timestamp"])
-        if locked <= 0 or unlock <= snapshot["reserve_block_timestamp"]:
-            raise VerificationError("saldo LP ou prazo de lock inválido/expirado")
-        fraction = locked / supply
-        if fraction < 0.999:
-            raise VerificationError("fração LP bloqueada inferior a 99,9%")
-        snapshot.update(evidence)
-        snapshot.update({"status": "verified", "protected_fraction": fraction,
-                         "verifier": "dot_cripto_onchain_v2", "reason": None})
-    except Exception as exc:
-        snapshot["reason"] = str(exc)[:500]
-    _audit(snapshot, audit_path)
     return snapshot
