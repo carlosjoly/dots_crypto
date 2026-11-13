@@ -218,8 +218,33 @@ def fetch_current_pool_liquidity(network, pool_address):
     attrs = data.get("attributes") if isinstance(data, dict) else None
     if not isinstance(attrs, dict):
         raise ValueError("GeckoTerminal não retornou atributos válidos para o pool")
+
+    # Fail closed unless the response itself identifies the exact requested pool.
+    returned_address = str(attrs.get("address") or "").strip()
+    if not re.fullmatch(r"0x[a-fA-F0-9]{40}", returned_address):
+        raise ValueError("GeckoTerminal não confirmou um endereço de pool válido na resposta")
+    if returned_address.lower() != address.lower():
+        raise ValueError("GeckoTerminal retornou um endereço diferente do pool solicitado")
+
+    resource_id = str(data.get("id") or "").strip()
+    if resource_id:
+        prefix = f"{slug}_"
+        resource_address = resource_id[len(prefix):] if resource_id.startswith(prefix) else ""
+        if (
+            not re.fullmatch(r"0x[a-fA-F0-9]{40}", resource_address)
+            or resource_address.lower() != address.lower()
+        ):
+            raise ValueError("ID do recurso GeckoTerminal não corresponde à rede/pool solicitados")
+
     classification, liquidity = _classify_liquidity(attrs.get("reserve_in_usd"), 25000)
-    return {"classification": classification, "liquidity_usd": liquidity, "provider": "GeckoTerminal", "pool_address": address.lower()}
+    return {
+        "classification": classification,
+        "liquidity_usd": liquidity,
+        "provider": "GeckoTerminal",
+        "pool_address": returned_address.lower(),
+        "pool_id": resource_id or None,
+        "network_id": slug,
+    }
 
 
 def independent_lp_proof_is_valid(alert):
