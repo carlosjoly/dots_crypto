@@ -27,3 +27,7 @@ Também não está ligado ao runner Bot F. Nenhuma rede/DEX além desta combina�
 
 ## Status de entrega
 Este adaptador não é chamado pelo runner e não deve ser usado para construir um comprovante elegível ao Telegram até existir vínculo verificável com a transação de lock e validação operacional do deployment.
+
+
+## Transação de lock
+Para cada registro ativo, o adaptador localiza `onDeposit(address,address,uint256,uint256,uint256)` emitido pelo endereço do locker, confere LP, owner, amount inicial e lockDate contra `tokenLocks`, e valida o recibo da transação no mesmo bloco do log. Não aceita apenas um hash fornecido por API externa.
