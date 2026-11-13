@@ -212,7 +212,7 @@ def fetch_current_pool_liquidity(network, pool_address):
     slug = gecko_network_id(network)
     payload = _get_json(
         f"{GECKO_BASE}/networks/{slug}/pools/{address}",
-        params={" include": " "},
+        params=None,
     )
     data = payload.get("data") if isinstance(payload, dict) else None
     attrs = data.get("attributes") if isinstance(data, dict) else None
@@ -509,6 +509,7 @@ def _build_launch_alert(network, chain_id, token, pool, now, assessment,
         "pool_created_at_utc": created.isoformat() if created else None,
         "pool_url": _pool_url(network, pool),
         "pool_id": pool.get("pool_id"),
+        "pool_address": pool.get("pool_address"),
         "token_address": token["address"],
         "network": network,
         "chain_id": chain_id,
