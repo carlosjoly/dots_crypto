@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 import requests
 
-from app.new_launches import _get_json, _market_eligibility, _select_token, _pool_url, _load_seen, _save_seen, _load_review_state, _save_review_state, _review_recheck_due, release_seen_token, _holder_count_review_reason, _classify_liquidity, fetch_current_pool_liquidity, scan_new_launches
+from app.new_launches import _get_json, _market_eligibility, _select_token, _pool_url, _load_seen, _save_seen, _load_review_state, _save_review_state, _review_recheck_due, release_seen_token, _holder_count_review_reason, _classify_liquidity, fetch_current_pool_liquidity, scan_new_launches, independent_lp_proof_is_valid
 from app.security import evaluate_launch_security, get_goplus_access_token
 import hashlib
 from app.alerts import format_message
@@ -686,3 +686,63 @@ class BotFScreeningTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class IndependentLpProofIdentityTests(unittest.TestCase):
+    def setUp(self):
+        self.alert = {
+            "network": "bsc",
+            "chain_id": "56",
+            "pool_address": "0x" + "a" * 40,
+            "independent_lp_proof": {
+                "status": "verified",
+                "source": "EVM_JSON_RPC",
+                "network": "bsc",
+                "chain_id": "56",
+                "pool_address": "0x" + "a" * 40,
+                "pool_factory": "0xca143ce32fe78f1f7019d7d551a6402fc5350c73",
+                "lock_contract": "0xc765bddb93b0d1c1a88282ba0fa6b2d00e3e0c83",
+                "liquidity_usd": 30000,
+                "protected_fraction": 0.9995,
+                "reserve_block_number": 123456,
+                "reserve_block_hash": "0x" + "b" * 64,
+                "locker_runtime_code_hash": "0x" + "c" * 64,
+                "lock_transactions": [{"transaction_hash": "0x" + "d" * 64}],
+            },
+        }
+
+    def test_accepts_complete_proof_bound_to_exact_bsc_pool(self):
+        self.assertTrue(independent_lp_proof_is_valid(self.alert))
+
+    def test_rejects_proof_for_different_pool(self):
+        self.alert["independent_lp_proof"]["pool_address"] = "0x" + "e" * 40
+        self.assertFalse(independent_lp_proof_is_valid(self.alert))
+
+    def test_rejects_wrong_chain_or_network(self):
+        self.alert["independent_lp_proof"]["chain_id"] = "1"
+        self.assertFalse(independent_lp_proof_is_valid(self.alert))
+        self.alert["independent_lp_proof"]["chain_id"] = "56"
+        self.alert["network"] = "eth"
+        self.assertFalse(independent_lp_proof_is_valid(self.alert))
+
+    def test_rejects_unapproved_locker_or_factory(self):
+        self.alert["independent_lp_proof"]["lock_contract"] = "0x" + "e" * 40
+        self.assertFalse(independent_lp_proof_is_valid(self.alert))
+        self.alert["independent_lp_proof"]["lock_contract"] = "0xc765bddb93b0d1c1a88282ba0fa6b2d00e3e0c83"
+        self.alert["independent_lp_proof"]["pool_factory"] = "0x" + "e" * 40
+        self.assertFalse(independent_lp_proof_is_valid(self.alert))
+
+    def test_rejects_missing_block_hash_runtime_hash_or_transaction_evidence(self):
+        for field in ("reserve_block_hash", "locker_runtime_code_hash", "lock_transactions"):
+            proof = self.alert["independent_lp_proof"]
+            original = proof.pop(field)
+            self.assertFalse(independent_lp_proof_is_valid(self.alert), field)
+            proof[field] = original
+
+    def test_rejects_non_finite_liquidity_or_lock_fraction(self):
+        proof = self.alert["independent_lp_proof"]
+        proof["liquidity_usd"] = float("inf")
+        self.assertFalse(independent_lp_proof_is_valid(self.alert))
+        proof["liquidity_usd"] = 30000
+        proof["protected_fraction"] = float("nan")
+        self.assertFalse(independent_lp_proof_is_valid(self.alert))
