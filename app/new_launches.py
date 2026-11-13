@@ -2,7 +2,6 @@
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import json
-import math
 import logging
 import random
 from pathlib import Path
@@ -249,57 +248,15 @@ def fetch_current_pool_liquidity(network, pool_address):
 
 
 def independent_lp_proof_is_valid(alert):
-    """Accept only a complete BSC/UNCX proof bound to this exact alert.
+    """Fail closed until the runner invokes a trusted on-chain verifier.
 
-    A dictionary containing plausible-looking fields is not enough: the proof
-    must identify the same network, chain and pool, the allowlisted PancakeSwap
-    V2 factory and UNCX locker, and a pinned block/runtime hash. Other networks
-    remain blocked until their own reviewed lock adapters are allowlisted.
+    A dictionary, even with plausible chain/pool/block/transaction fields, is
+    not evidence that those facts were obtained from an RPC or validated.
+    The scanner does not currently produce a verifier-attested result and the
+    UNCX deployment/ABI has not passed live BSC validation. Therefore no
+    caller-supplied proof payload can authorize Telegram delivery.
     """
-    proof = alert.get("independent_lp_proof")
-    if not isinstance(proof, dict) or proof.get("status") != "verified":
-        return False
-    try:
-        liquidity = float(proof.get("liquidity_usd"))
-        protected = float(proof.get("protected_fraction"))
-        block_number = int(proof.get("reserve_block_number"))
-    except (TypeError, ValueError, OverflowError):
-        return False
-
-    expected_pool = str(alert.get("pool_address") or "").lower()
-    proof_pool = str(proof.get("pool_address") or "").lower()
-    expected_chain = str(alert.get("chain_id") or "")
-    proof_chain = str(proof.get("chain_id") or "")
-    txs = proof.get("lock_transactions")
-    if not isinstance(txs, list) or not txs:
-        return False
-    if not all(
-        isinstance(item, dict)
-        and re.fullmatch(r"0x[a-fA-F0-9]{64}", str(item.get("transaction_hash") or ""))
-        for item in txs
-    ):
-        return False
-
-    return (
-        math.isfinite(liquidity)
-        and math.isfinite(protected)
-        and liquidity >= 25000
-        and 0.999 <= protected <= 1.0
-        and alert.get("network") == "bsc"
-        and proof.get("network") == "bsc"
-        and expected_chain == "56"
-        and proof_chain == expected_chain
-        and re.fullmatch(r"0x[a-f0-9]{40}", expected_pool) is not None
-        and proof_pool == expected_pool
-        and str(proof.get("pool_factory") or "").lower() == "0xca143ce32fe78f1f7019d7d551a6402fc5350c73"
-        and str(proof.get("locker_factory") or "").lower() == "0xca143ce32fe78f1f7019d7d551a6402fc5350c73"
-        and str(proof.get("lock_contract") or "").lower() == "0xc765bddb93b0d1c1a88282ba0fa6b2d00e3e0c83"
-        and str(proof.get("source") or "") == "EVM_JSON_RPC"
-        and block_number > 0
-        and re.fullmatch(r"0x[a-fA-F0-9]{64}", str(proof.get("reserve_block_hash") or "")) is not None
-        and re.fullmatch(r"0x[a-fA-F0-9]{64}", str(proof.get("locker_runtime_code_hash") or "")) is not None
-    )
-
+    return False
 
 def _number(value):
     try:
