@@ -187,7 +187,7 @@ class UncxBscLockTests(unittest.TestCase):
             self.assertEqual(result["network"], "bsc")
             self.assertEqual(result["pool_address"], POOL)
             self.assertEqual(result["chain_id"], "56")
-            self.assertEqual(result["reserve_block_hash"], "0x" + "a" * 64)
+            self.assertEqual(result["reserve_block_hash"], "0x" + "1" * 64)
             self.assertTrue(result["lock_transactions"])
             self.assertTrue(result["lock_transaction"])
             self.assertEqual(result["pool_factory"], PANCAKE_V2_FACTORY)
