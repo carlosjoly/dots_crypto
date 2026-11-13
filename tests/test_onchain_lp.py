@@ -68,7 +68,7 @@ class OnchainLpTests(unittest.TestCase):
         result = build_independent_lp_proof("base", POOL, [FACTORY], rpc=FakeRpc())
         self.assertEqual(result["status"], "reserve_verified_lock_unverified")
         self.assertNotIn("protected_fraction", result)
-    def test_lock_adapter_is_not_accepted_as_unverified_input(self):
+    def test_no_lock_adapter_means_never_verified(self):
         result = build_independent_lp_proof("base", POOL, [FACTORY], rpc=FakeRpc())
         self.assertEqual(result["status"], "reserve_verified_lock_unverified")
         self.assertIn("sem adaptador", result["reason"])
