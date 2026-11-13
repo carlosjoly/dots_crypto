@@ -20,6 +20,8 @@ SELECTORS = {
     "uniswapFactory()": "11111111",
     "getNumLocksForToken(address)": "22222222",
     "tokenLocks(address,uint256)": "33333333",
+    "totalSupply()": "18160ddd",
+    "balanceOf(address)": "70a08231",
 }
 
 
