@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 import requests
 
-from app.new_launches import _get_json, _market_eligibility, _select_token, _pool_url, _load_seen, _save_seen, _load_review_state, _save_review_state, _review_recheck_due, release_seen_token, _holder_count_review_reason, _classify_liquidity, fetch_current_pool_liquidity, scan_new_launches
+from app.new_launches import _get_json, _market_eligibility, _select_token, _pool_url, _load_seen, _save_seen, _load_review_state, _save_review_state, _review_recheck_due, release_seen_token, _holder_count_review_reason, _classify_liquidity, fetch_current_pool_liquidity, independent_lp_proof_is_valid, scan_new_launches
 from app.security import evaluate_launch_security, get_goplus_access_token
 import hashlib
 from app.alerts import format_message
