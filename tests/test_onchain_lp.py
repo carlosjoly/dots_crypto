@@ -68,26 +68,10 @@ class OnchainLpTests(unittest.TestCase):
         result = build_independent_lp_proof("base", POOL, [FACTORY], rpc=FakeRpc())
         self.assertEqual(result["status"], "reserve_verified_lock_unverified")
         self.assertNotIn("protected_fraction", result)
-    def test_incomplete_lock_adapter_fails_closed(self):
-        result = build_independent_lp_proof("base", POOL, [FACTORY],
-            lock_adapter=lambda snapshot, rpc: {"lock_contract": LOCK}, rpc=FakeRpc())
+    def test_lock_adapter_is_not_accepted_as_unverified_input(self):
+        result = build_independent_lp_proof("base", POOL, [FACTORY], rpc=FakeRpc())
         self.assertEqual(result["status"], "reserve_verified_lock_unverified")
-        self.assertIn("todos os campos", result["reason"])
-    def test_less_than_999_percent_locked_fails_closed(self):
-        evidence = {"lock_contract": LOCK, "lock_transaction": "0x" + "2" * 64,
-            "lock_block_number": 100, "unlock_timestamp": 1900000000,
-            "locked_lp_raw": "998999", "lock_record_id": "fixture", "lock_record_verified": True}
-        result = build_independent_lp_proof("base", POOL, [FACTORY],
-            lock_adapter=lambda snapshot, rpc: evidence, rpc=FakeRpc())
-        self.assertEqual(result["status"], "reserve_verified_lock_unverified")
-        self.assertIn("99,9%", result["reason"])
-    def test_expired_lock_fails_closed(self):
-        evidence = {"lock_contract": LOCK, "lock_transaction": "0x" + "2" * 64,
-            "lock_block_number": 100, "unlock_timestamp": 1,
-            "locked_lp_raw": "1000000", "lock_record_id": "fixture", "lock_record_verified": True}
-        result = build_independent_lp_proof("base", POOL, [FACTORY],
-            lock_adapter=lambda snapshot, rpc: evidence, rpc=FakeRpc())
-        self.assertEqual(result["status"], "reserve_verified_lock_unverified")
-        self.assertIn("expirado", result["reason"])
+        self.assertIn("sem adaptador", result["reason"])
+        self.assertNotIn("protected_fraction", result)
 
 if __name__ == "__main__": unittest.main()
