@@ -29,6 +29,15 @@ def main():
     processed = 0
     delivery_errors = 0
     for alert in alerts:
+        if (
+            alert.get("discovery_status") != "ELEGÍVEL PARA WATCHLIST — NÃO É RECOMENDAÇÃO"
+            or alert.get("goplus_status") != "eligible_for_watchlist"
+        ):
+            log.warning(
+                "Bot F Telegram bloqueado: candidato pendente ou sem aprovação de segurança para %s.",
+                alert.get("pool_id", alert.get("symbol", "N/D")),
+            )
+            continue
         try:
             fresh = fetch_current_pool_liquidity(alert.get("network"), alert.get("pool_address"))
             if fresh["classification"] != "passed":
