@@ -39,7 +39,7 @@ class BotFStandaloneRunnerTests(unittest.TestCase):
     ):
         load_config.return_value = self.cfg
         self.assertEqual(main(), 1)
-        release.assert_called_once_with(self.cfg, {"symbol": "TEST", "token_address": "0x1"})
+        release.assert_called_once_with(self.cfg, {"symbol": "TEST", "token_address": "0x1", "liquidity_usd": 30000})
 
     @patch("app.run_bot_f.scan_new_launches", side_effect=RuntimeError("provider unavailable"))
     @patch("app.run_bot_f.setup_logging")
