@@ -95,26 +95,34 @@ def diagnose_pool(rpc, pool, block):
         result["factory_pair"] = "0x" + pair_result[-40:]
         result["factory_pair_matches_pool"] = result["factory_pair"].lower() == pool.lower()
 
-        count_data = eth_call(
-            rpc, LOCKER,
-            selector(rpc, "getNumLocksForToken(address)") + addr_arg(pool),
-            block,
-        )
-        if not isinstance(count_data, str) or not count_data.startswith("0x"):
-            raise RuntimeError("getNumLocksForToken returned malformed data")
-        lock_count = int(count_data, 16)
-        result["getNumLocksForToken_count"] = lock_count
-        if lock_count > 0:
-            token_locks_data = eth_call(
+        try:
+            count_data = eth_call(
                 rpc, LOCKER,
-                selector(rpc, "tokenLocks(address,uint256)") + addr_arg(pool) + word(0),
+                selector(rpc, "getNumLocksForToken(address)") + addr_arg(pool),
                 block,
             )
-            result["tokenLocks_index0_return_bytes"] = (
-                max(0, (len(token_locks_data) - 2) // 2)
-                if isinstance(token_locks_data, str) else None
-            )
-            result["tokenLocks_index0_raw"] = token_locks_data
+            if not isinstance(count_data, str) or not count_data.startswith("0x"):
+                raise RuntimeError("getNumLocksForToken returned malformed data")
+            lock_count = int(count_data, 16)
+            result["getNumLocksForToken_count"] = lock_count
+            if lock_count > 0:
+                try:
+                    token_locks_data = eth_call(
+                        rpc, LOCKER,
+                        selector(rpc, "tokenLocks(address,uint256)") + addr_arg(pool) + word(0),
+                        block,
+                    )
+                    result["tokenLocks_index0_return_bytes"] = (
+                        max(0, (len(token_locks_data) - 2) // 2)
+                        if isinstance(token_locks_data, str) else None
+                    )
+                    result["tokenLocks_index0_raw"] = token_locks_data
+                except Exception as exc:
+                    result["tokenLocks_probe_error"] = str(exc)[:200]
+        except Exception as exc:
+            # Legacy and v2.1 UNCX deployments expose different lock getters.
+            # Keep collecting independent pool/factory/reserve evidence.
+            result["getNumLocksForToken_probe_error"] = str(exc)[:200]
 
         reserves = eth_call(rpc, pool, "0x0902f1ac", block)
         if not isinstance(reserves, str) or len(reserves) < 194:
