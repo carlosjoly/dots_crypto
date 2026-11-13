@@ -120,7 +120,7 @@ class FakeRpc:
 
 
 class UncxBscLockTests(unittest.TestCase):
-    def test_verified_storage_lock_requires_pinned_runtime_hash(self):
+    def test_lock_storage_and_transaction_event_require_pinned_runtime_hash(self):
         with tempfile.TemporaryDirectory() as tmp:
             result = verify_uncx_bsc_pancakeswap_v2_lock(
                 POOL, FakeRpc(), expected_locker_code_hash=CODE_HASH,
