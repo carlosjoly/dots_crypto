@@ -35,3 +35,19 @@ A suíte cobre sucesso simulado e bloqueio para hash ausente/incorreto, chainId 
 
 ## Segurança e ativação
 Read-only: sem assinatura, transações, ordens ou execução de trades. Nenhum alerta é habilitado por este adaptador. Não integrar ao runner nem permitir Telegram até concluir: confirmação direta do deployment com UNCX, hash runtime obtido e reproduzido em RPC BSC confiável, ABI real confirmada, testes contra pools reais e revisão independente do resultado.
+
+
+## Diagnóstico operacional BSC (somente leitura)
+
+Foi adicionado `scripts/diagnose_uncx_bsc.py` para recolher evidência do deployment real sem assinar nem enviar transações. Ele consulta chainId/bloco, bytecode e hash runtime do locker, factory configurada, selectors e tópicos das interfaces legada/2.1. Para cada pool, consulta factory, tokens, confirmação `factory.getPair`, reservas, totalSupply, número de locks e tenta ler o índice zero com `tokenLocks(address,uint256)` quando há locks.
+
+No PowerShell, a partir da raiz do repositório:
+
+```powershell
+$env:BOT_F_RPC_URL_BSC = "https://SEU-ENDPOINT-RPC-BSC"
+python .\scripts\diagnose_uncx_bsc.py --pool 0x8b8677f508f0758d05b2957e16371be3f231fcd8 --pool 0x7500d19c281066887c1d5bb885997375738bf517
+```
+
+Use um endpoint RPC BSC confiável. O script não imprime a URL/credencial RPC. Não publique o valor de `BOT_F_RPC_URL_BSC`. O JSON de saída não é, por si só, uma aprovação de segurança: deve ser confrontado com a ABI e deployment confirmados diretamente pela UNCX e com o bytecode do explorer.
+
+**Importante:** a documentação pública da UNCX apresenta tanto a interface legada (evento `onDeposit`) quanto a interface 2.1 (eventos `onNewLock`, `onRelock`, etc.). A documentação descreve `getUserLockForTokenAtIndex(address,address,uint256)`, não a chamada direta `tokenLocks(address,uint256)` usada pelo adaptador atual. Isso não prova qual ABI está efetivamente implantada no endereço BSC. O diagnóstico precisa confirmar a interface real antes de qualquer ajuste ou ativação. Um selector que retorna dados não basta para provar semântica correta.
