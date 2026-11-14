@@ -36,7 +36,9 @@ BINANCE_SPOT_OUTAGES = ((
 
 def is_documented_spot_outage_gap(open_time, timeframe):
     """True only for an expected candle start wholly inside a documented halt."""
-    if timeframe not in BASE_INTERVAL_MS:
+    # A 4h candle spanning the outage should still exist because trading
+    # resumed before that candle closed; only 15m/1h bars can be wholly absent.
+    if timeframe not in ("15m", "1h"):
         return False
     ts = pd.Timestamp(open_time)
     if ts.tzinfo is None:
