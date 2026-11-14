@@ -26,6 +26,7 @@ HASH_RE = re.compile(r"^0x[a-fA-F0-9]{64}$")
 GET_NUM_LOCKS = "0x1f2a1d2f"
 GET_USER_NUM_LOCKS = "0xa69d9c4f"
 GET_USER_LOCK = "0xd4ff493f"
+TOKEN_LOCKS = "0xccebfa3f"
 ON_NEW_LOCK = "0x3e5a874dd8f086c73bba5a860cb04972e50b6207f84cc020037d576afa6ebc13"
 ON_DEPOSIT_LEGACY = "0x830357565da6ecfc26d8d9f69df488ed6f70361af9a07e570544aeb5c5e765e"
 
@@ -82,6 +83,52 @@ def decode_words(raw, expected):
 
 def decode_address_word(value):
     return "0x" + format(int(value), "064x")[-40:]
+
+
+def decode_legacy_lock(raw):
+    """Decode the deployed BSC locker ABI: six static tokenLocks return fields."""
+    lock_date, amount, initial_amount, unlock_date, lock_id, owner = decode_words(raw, 6)
+    return {
+        "lock_date": lock_date,
+        "amount_raw": str(amount),
+        "initial_amount_raw": str(initial_amount),
+        "unlock_date": unlock_date,
+        "lock_id": lock_id,
+        "owner": decode_address_word(owner).lower(),
+    }
+
+
+def decode_legacy_deposit(log):
+    """Decode legacy onDeposit(address,address,uint256,uint256,uint256); no indexed args."""
+    if str(log.get("address", "")).lower() != LOCKER:
+        raise DiagnosticError("legacy deposit log has the wrong contract address")
+    topics = log.get("topics") or []
+    if len(topics) != 1 or str(topics[0]).lower() != ON_DEPOSIT_LEGACY:
+        raise DiagnosticError("invalid legacy onDeposit topics")
+    lp_token, user, amount, lock_date, unlock_date = decode_words(log.get("data"), 5)
+    return {
+        "lp_token": decode_address_word(lp_token).lower(),
+        "user": decode_address_word(user).lower(),
+        "amount_raw": str(amount),
+        "lock_date": lock_date,
+        "unlock_date": unlock_date,
+        "transaction_hash": str(log.get("transactionHash") or "").lower(),
+        "block_number": int(str(log.get("blockNumber") or "0x0"), 16),
+        "log_index": int(str(log.get("logIndex") or "0x0"), 16),
+        "raw_data": str(log.get("data") or "").lower(),
+    }
+
+
+def legacy_event_matches(record, event, pool):
+    """Match a legacy lock by exact LP, lock dates and stored initial/current amount."""
+    return (
+        event.get("lp_token") == str(pool).lower()
+        and event.get("lock_date") == record.get("lock_date")
+        and event.get("unlock_date") == record.get("unlock_date")
+        and event.get("amount_raw") in (
+            record.get("amount_raw"), record.get("initial_amount_raw")
+        )
+    )
 
 
 def decode_v21_new_lock(log):
@@ -203,14 +250,9 @@ def diagnose_pool(rpc, pool, block, lookback_blocks, chunk_size):
         }, start, block_number, chunk_size)
         legacy_pool_events = []
         for item in legacy_logs:
-            data = str(item.get("data") or "")
-            if len(data) >= 66 and data.startswith("0x"):
-                logged_pool = "0x" + data[2:66][-40:]
-                if logged_pool.lower() == pool:
-                    legacy_pool_events.append({
-                        "transaction_hash": str(item.get("transactionHash") or "").lower(),
-                        "block_number": int(str(item.get("blockNumber") or "0x0"), 16),
-                    })
+            event = decode_legacy_deposit(item)
+            if event["lp_token"] == pool:
+                legacy_pool_events.append(event)
 
         result["history"] = {
             "from_block": start,
@@ -230,6 +272,109 @@ def diagnose_pool(rpc, pool, block, lookback_blocks, chunk_size):
                 result["consistency_warning"] = (
                     "onNewLock events exist in the lookback but the current global lock count is zero"
                 )
+            return result
+
+        # The BSC deployment at this address is verified on BscScan as the
+        # Solidity 0.6.12 legacy locker. Its public tokenLocks getter returns
+        # six fields, unlike the eight-field V2.1 structure in current docs.
+        # Probe that deployed ABI first; only fall back to V2.1 if it is absent.
+        if global_count > 500:
+            raise DiagnosticError("global lock count exceeds safety limit")
+        legacy_records = []
+        legacy_abi_available = True
+        for index in range(global_count):
+            try:
+                raw = _eth_call(
+                    rpc, LOCKER,
+                    TOKEN_LOCKS + address_arg(pool) + word(index),
+                    block_tag,
+                )
+                lock = decode_legacy_lock(raw)
+            except DiagnosticError:
+                legacy_abi_available = False
+                break
+            if int(lock["initial_amount_raw"]) < int(lock["amount_raw"]):
+                raise DiagnosticError("legacy lock amount exceeds its initial amount")
+            if int(lock["amount_raw"]) > 0 and lock["owner"] == "0x" + "0" * 40:
+                raise DiagnosticError("active legacy lock has a zero owner")
+            lock["lp_token"] = pool
+            lock["index"] = index
+            legacy_records.append(lock)
+
+        if legacy_abi_available:
+            if len(legacy_records) != global_count:
+                raise DiagnosticError("legacy tokenLocks record count is incomplete")
+            locker_balance = _uint_call(
+                rpc, pool, "0x70a08231" + address_arg(LOCKER), block_tag
+            )
+            active = [
+                item for item in legacy_records
+                if int(item["amount_raw"]) > 0
+                and int(item["unlock_date"]) > int(block.get("timestamp", "0x0"), 16)
+            ]
+            locked_active = sum(int(item["amount_raw"]) for item in active)
+            fraction = locked_active / total_supply
+            if fraction > 1.0000000001:
+                raise DiagnosticError("active locked LP exceeds total LP supply")
+            if locker_balance < locked_active:
+                raise DiagnosticError("locker LP balance is below the sum of active legacy lock records")
+
+            linked = []
+            used_hashes = set()
+            for record in active:
+                matches = [
+                    event for event in legacy_pool_events
+                    if legacy_event_matches(record, event, pool)
+                ]
+                if len(matches) != 1:
+                    raise DiagnosticError("active legacy lock has no unique onDeposit event in lookback")
+                event = matches[0]
+                tx_hash = event["transaction_hash"]
+                if not HASH_RE.fullmatch(tx_hash) or tx_hash in used_hashes:
+                    raise DiagnosticError("legacy lock transaction hash is missing, invalid or ambiguous")
+                receipt = rpc.call("eth_getTransactionReceipt", [tx_hash])
+                if not isinstance(receipt, dict) or receipt.get("status") != "0x1":
+                    raise DiagnosticError("legacy onDeposit receipt is absent or unsuccessful")
+                if int(str(receipt.get("blockNumber") or "0x0"), 16) != event["block_number"]:
+                    raise DiagnosticError("legacy receipt block does not match onDeposit event block")
+                exact_event = any(
+                    str(item.get("address", "")).lower() == LOCKER
+                    and [str(topic).lower() for topic in (item.get("topics") or [])] == [ON_DEPOSIT_LEGACY]
+                    and str(item.get("data", "")).lower() == event["raw_data"]
+                    for item in (receipt.get("logs") or [])
+                )
+                if not exact_event:
+                    raise DiagnosticError("legacy receipt does not contain the exact onDeposit event")
+                used_hashes.add(tx_hash)
+                linked.append({
+                    "lock_id": record["lock_id"],
+                    "transaction_hash": tx_hash,
+                    "event_block_number": event["block_number"],
+                    "depositor": event["user"],
+                    "owner": record["owner"],
+                    "amount_raw": record["amount_raw"],
+                    "unlock_date": record["unlock_date"],
+                })
+
+            result.update({
+                "lock_abi": "legacy_six_field_tokenLocks",
+                "lock_records": legacy_records,
+                "active_lock_records": len(active),
+                "locker_lp_balance_raw": str(locker_balance),
+                "active_locked_lp_raw": str(locked_active),
+                "protected_fraction": fraction,
+                "lock_transactions": linked,
+                "protection_threshold_999pct_met": fraction >= 0.999,
+            })
+            if not active:
+                result["status"] = "no_active_locks"
+                result["reason"] = "legacy getter returned no positive LP locks with a future unlock date"
+            elif fraction < 0.999:
+                result["status"] = "underprotected"
+                result["reason"] = "active legacy LP protection is below 99.9%"
+            else:
+                result["status"] = "legacy_locks_observed_and_receipts_linked"
+                result["reason"] = "legacy lock records and receipts linked; diagnostic does not approve alerts"
             return result
 
         owners = sorted({event["owner"] for event in decoded_events})
