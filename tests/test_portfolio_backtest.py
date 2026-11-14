@@ -151,7 +151,20 @@ class HistoricalCandleValidationTests(unittest.TestCase):
         frame["close_time"] = pd.to_datetime(frame["close_time"], utc=True)
         self.assertIs(validate_candle_frame(frame, "BTCUSDT", "15m"), frame)
 
-    def test_gap_in_historical_candles_is_rejected(self):
+    def test_documented_binance_spot_outage_gap_is_accepted(self):
+        frame = pd.DataFrame([
+            {"open_time": "2023-03-24T12:30:00Z", "open": 100.0, "high": 102.0,
+             "low": 99.0, "close": 101.0, "volume": 10.0, "quote_volume": 1000.0,
+             "close_time": "2023-03-24T12:44:59Z"},
+            {"open_time": "2023-03-24T13:00:00Z", "open": 101.0, "high": 103.0,
+             "low": 100.0, "close": 102.0, "volume": 11.0, "quote_volume": 1100.0,
+             "close_time": "2023-03-24T13:14:59Z"},
+        ])
+        frame["open_time"] = pd.to_datetime(frame["open_time"], utc=True)
+        frame["close_time"] = pd.to_datetime(frame["close_time"], utc=True)
+        self.assertIs(validate_candle_frame(frame, "BTCUSDT", "15m"), frame)
+
+    def test_gap_outside_documented_binance_outage_is_rejected(self):
         frame = pd.DataFrame([
             {"open_time": "2026-01-01T00:00:00Z", "open": 100.0, "high": 102.0,
              "low": 99.0, "close": 101.0, "volume": 10.0, "quote_volume": 1000.0,
