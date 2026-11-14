@@ -7,6 +7,7 @@ from scripts.diagnose_uncx_bsc_v21 import (
     decode_legacy_lock,
     legacy_event_matches,
     DiagnosticError,
+    _function_selector,
 )
 
 
@@ -19,6 +20,30 @@ def address_word(value):
 
 
 class UncxBscLegacyAbiTests(unittest.TestCase):
+    def test_derives_locker_factory_selector_from_keccak_signature(self):
+        class FakeRpc:
+            def __init__(self):
+                self.calls = []
+
+            def call(self, method, params):
+                self.calls.append((method, params))
+                return "0x" + "ab" * 32
+
+        rpc = FakeRpc()
+        self.assertEqual(_function_selector(rpc, "uniswapFactory()"), "0xabababab")
+        self.assertEqual(
+            rpc.calls,
+            [("web3_sha3", ["0x" + "uniswapFactory()".encode("ascii").hex()])],
+        )
+
+    def test_rejects_malformed_keccak_response(self):
+        class FakeRpc:
+            def call(self, method, params):
+                return "0x1234"
+
+        with self.assertRaises(DiagnosticError):
+            _function_selector(FakeRpc(), "uniswapFactory()")
+
     def test_decodes_six_field_token_locks_return(self):
         owner = "0x" + "b" * 40
         raw = "0x" + "".join([

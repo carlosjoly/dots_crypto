@@ -154,6 +154,15 @@ def decode_v21_new_lock(log):
     }
 
 
+def _function_selector(rpc, signature):
+    """Derive a function selector with Ethereum Keccak via the configured RPC."""
+    payload = "0x" + signature.encode("ascii").hex()
+    digest = rpc.call("web3_sha3", [payload])
+    if not isinstance(digest, str) or not re.fullmatch(r"0x[a-fA-F0-9]{64}", digest):
+        raise DiagnosticError(f"{signature}: invalid web3_sha3 response")
+    return digest[:10]
+
+
 def _eth_call(rpc, to, data, block_tag):
     result = rpc.call("eth_call", [{"to": to, "data": data}, block_tag])
     if not isinstance(result, str) or not result.startswith("0x"):
@@ -518,7 +527,8 @@ def main():
         locker_code = rpc.call("eth_getCode", [LOCKER, block["number"]])
         if not isinstance(locker_code, str) or locker_code in ("0x", "0x0"):
             raise DiagnosticError("UNCX locker has no runtime bytecode")
-        factory = "0x" + _eth_call(rpc, LOCKER, "0xc45a0155", block["number"])[-40:]
+        factory_selector = _function_selector(rpc, "uniswapFactory()")
+        factory = "0x" + _eth_call(rpc, LOCKER, factory_selector, block["number"])[-40:]
         output.update({
             "chain_id": 56,
             "block_number": int(block["number"], 16),
