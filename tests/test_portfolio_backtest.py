@@ -239,6 +239,10 @@ class PortfolioSimulationTests(unittest.TestCase):
             with_spread["trades"][0]["net_pnl"],
             no_spread["trades"][0]["net_pnl"],
         )
+        self.assertLess(
+            with_spread["trades"][0]["quantity"],
+            no_spread["trades"][0]["quantity"],
+        )
 
     def test_splits_are_chronological_and_non_overlapping(self):
         bounds = chronological_bounds(100)
