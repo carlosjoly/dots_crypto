@@ -57,6 +57,7 @@ jobs:
           GOPLUS_ENABLED: ${{ secrets.GOPLUS_ENABLED }}
           GOPLUS_APP_KEY: ${{ secrets.GOPLUS_APP_KEY }}
           GOPLUS_APP_SECRET: ${{ secrets.GOPLUS_APP_SECRET }}
+          BOT_F_RPC_URL_BSC: ${{ secrets.BOT_F_RPC_URL_BSC }}
         run: python -m app.run_bot_f
       - name: Save Bot F deduplication state
         if: always()
