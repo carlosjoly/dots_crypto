@@ -277,7 +277,8 @@ def diagnose_pool(rpc, pool, block, lookback_blocks, chunk_size):
                 if event["pool"] == pool:
                     decoded_events.append(event)
 
-        # Legacy onDeposit has no indexed fields in the published legacy ABI.
+        # Derive the full legacy event topic; keep the signature as the source of truth.
+        legacy_deposit_topic = _event_topic(rpc, ON_DEPOSIT_LEGACY_SIGNATURE)
         legacy_logs = _chunked_logs(rpc, {
             "address": LOCKER, "topics": [legacy_deposit_topic],
         }, start, block_number, chunk_size)
