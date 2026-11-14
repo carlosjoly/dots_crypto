@@ -458,6 +458,27 @@ def release_seen_token(cfg, alert):
             _save_review_state(review_path, review_state)
 
 
+def defer_lp_proof_review(cfg, alert, reason):
+    """Release a candidate from dedupe and apply the normal review cooldown."""
+    release_seen_token(cfg, alert)
+    token_address = alert.get("token_address")
+    chain_id = alert.get("chain_id")
+    if not token_address or not chain_id:
+        return
+    identity = f"{chain_id}:{str(token_address).lower()}"
+    review_path = Path(cfg["_root"]) / cfg["launches"].get(
+        "review_state_file", "data/bot_f_review_state.json"
+    )
+    review_state = _load_review_state(review_path)
+    review_state[identity] = {
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "status": "lp_proof_pending",
+        "flags": [str(reason)[:240]],
+        "discovery_alert_sent": False,
+    }
+    _save_review_state(review_path, review_state)
+
+
 def _build_launch_alert(network, chain_id, token, pool, now, assessment,
                         pending=False, security_error=None, market_reason=None):
     created = _created_at(pool.get("created_at"))
