@@ -83,7 +83,7 @@ class FakeRpc:
             return []
         if method == "eth_getTransactionReceipt":
             event_topic = "0xabcdef01" + "0" * 56
-            event_data = "0x" + address_word(POOL)[2:] + address_word(OWNER)[2:] + word(1000000) + word(1700000000) + word(1900000000)
+            event_data = "0x" + address_word(POOL)[2:] + address_word(self.event_user)[2:] + word(1000000) + word(1700000000) + word(1900000000)
             return {
                 "status": self.receipt_status,
                 "blockNumber": "0x120",
