@@ -8,6 +8,7 @@ class BotFStandaloneRunnerTests(unittest.TestCase):
         self.alert={"symbol":"TEST","token_address":"0x"+"1"*40,"network":"bsc","chain_id":"56","pool_address":"0x"+"a"*40,"discovery_status":"ELEGÍVEL PARA WATCHLIST — NÃO É RECOMENDAÇÃO","goplus_status":"eligible_for_watchlist"}
         self.proof={"status":"verified","pool_address":self.alert["pool_address"]}
 
+    @patch("app.run_bot_f.defer_lp_proof_review")
     @patch("app.run_bot_f.is_valid_bsc_pancakeswap_v2_lp_proof",return_value=False)
     @patch("app.run_bot_f.build_bsc_pancakeswap_v2_lp_proof",return_value={"status":"blocked","reason":"no active lock"})
     @patch("app.run_bot_f.fetch_current_pool_liquidity",return_value={"classification":"passed","liquidity_usd":30000})
@@ -15,10 +16,10 @@ class BotFStandaloneRunnerTests(unittest.TestCase):
     @patch("app.run_bot_f.scan_new_launches")
     @patch("app.run_bot_f.setup_logging")
     @patch("app.run_bot_f.load_config")
-    def test_blocks_candidate_without_live_lp_proof(self,load_config,setup_logging,scan,emit,fresh,build,valid):
+    def test_blocks_candidate_without_live_lp_proof(self,load_config,setup_logging,scan,emit,fresh,build,valid,defer):
         load_config.return_value=self.cfg; scan.return_value=[dict(self.alert)]
         with patch.dict("os.environ",{"BOT_F_RPC_URL_BSC":"https://rpc.example"}): self.assertEqual(main(),0)
-        emit.assert_not_called(); fresh.assert_called_once(); build.assert_called_once(); valid.assert_called_once()
+        emit.assert_not_called(); fresh.assert_called_once(); build.assert_called_once(); valid.assert_called_once(); defer.assert_called_once()
 
     @patch("app.run_bot_f.build_bsc_pancakeswap_v2_lp_proof")
     @patch("app.run_bot_f.fetch_current_pool_liquidity",return_value={"classification":"passed","liquidity_usd":30000})
