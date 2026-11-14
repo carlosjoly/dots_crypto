@@ -47,12 +47,73 @@ def download_historical_klines(base_url, symbol, interval, start_ms, end_ms, ses
         if next_cursor <= cursor:
             raise RuntimeError(f"Historical pagination did not advance: {symbol} {interval}")
         cursor = next_cursor
-        if len(batch) < 1000:
-            break
-        time.sleep(0.15)
+        # Do not treat a short page as end-of-history: public data endpoints may
+        # return partial pages transiently. Continue from the last candle until
+        # the requested end is reached or the endpoint returns no rows.
+        if cursor < int(end_ms):
+            time.sleep(0.15)
 
     if not rows:
         raise ValueError(f"No historical candles returned: {symbol} {interval}")
+
+    # Recover internal gaps with targeted public-kline requests. Never fabricate
+    # OHLCV bars: if Binance cannot supply the exact missing open_time, reject
+    # the dataset rather than silently bridging it.
+    interval_ms = BASE_INTERVAL_MS[interval]
+    initial_times = sorted(int(row[0]) for row in rows)
+    if len(initial_times) != len(set(initial_times)):
+        raise ValueError(f"Historical sample contains duplicate candles: {symbol} {interval}")
+    missing_times = []
+    for left, right in zip(initial_times, initial_times[1:]):
+        delta = right - left
+        if delta % interval_ms:
+            raise ValueError(f"Historical candle timestamps are irregular: {symbol} {interval}")
+        missing_times.extend(left + interval_ms * step for step in range(1, delta // interval_ms))
+    expected_latest_open_ms = (int(end_ms) // interval_ms) * interval_ms - interval_ms
+    if initial_times[-1] < expected_latest_open_ms:
+        tail_delta = expected_latest_open_ms - initial_times[-1]
+        if tail_delta % interval_ms:
+            raise ValueError(f"Historical sample has an irregular final timestamp: {symbol} {interval}")
+        missing_times.extend(
+            initial_times[-1] + interval_ms * step
+            for step in range(1, tail_delta // interval_ms + 1)
+        )
+    if len(missing_times) > 100:
+        raise ValueError(
+            f"Historical sample has {len(missing_times)} missing candles; refusing bulk repair: {symbol} {interval}"
+        )
+    for missing_open_ms in missing_times:
+        recovered = False
+        for attempt in range(3):
+            try:
+                response = session.get(
+                    url,
+                    params={
+                        "symbol": symbol, "interval": interval,
+                        "startTime": missing_open_ms,
+                        "endTime": missing_open_ms + interval_ms - 1,
+                        "limit": 10,
+                    },
+                    timeout=20,
+                )
+                response.raise_for_status()
+                candidates = response.json()
+                exact = [row for row in candidates if int(row[0]) == missing_open_ms]
+                if len(exact) == 1:
+                    rows.extend(exact)
+                    recovered = True
+                    break
+            except requests.RequestException:
+                if attempt == 2:
+                    raise
+            if attempt < 2:
+                time.sleep(0.25 * (attempt + 1))
+        if not recovered:
+            raise ValueError(
+                f"Unable to recover missing candle {missing_open_ms}: {symbol} {interval}"
+            )
+
+    rows.sort(key=lambda row: int(row[0]))
     frame = pd.DataFrame(rows, columns=COLUMNS)
     for column in ["open", "high", "low", "close", "volume", "quote_volume"]:
         frame[column] = pd.to_numeric(frame[column], errors="coerce")
@@ -66,6 +127,13 @@ def download_historical_klines(base_url, symbol, interval, start_ms, end_ms, ses
     frame = frame[frame["close_time"] < pd.Timestamp.now(tz="UTC")].copy().reset_index(drop=True)
     if frame.empty:
         raise ValueError(f"Historical sample contains no fully closed candles: {symbol} {interval}")
+    expected_latest_open_ms = (int(end_ms) // interval_ms) * interval_ms - interval_ms
+    actual_latest_open_ms = int(frame.iloc[-1]["open_time"].timestamp() * 1000)
+    if actual_latest_open_ms < expected_latest_open_ms:
+        missing_tail = (expected_latest_open_ms - actual_latest_open_ms) // interval_ms
+        raise ValueError(
+            f"Historical sample ends {missing_tail} candles early: {symbol} {interval}"
+        )
     if frame[["open", "high", "low", "close", "volume", "quote_volume"]].isna().any().any():
         raise ValueError(f"Historical candles contain invalid numeric values: {symbol} {interval}")
     if (frame[["open", "high", "low", "close"]] <= 0).any().any() or (frame[["volume", "quote_volume"]] < 0).any().any():
@@ -98,11 +166,14 @@ def signal_direction(alert):
 
 
 def net_event_return(entry_price, exit_price, direction, fee_per_side_pct=0.10,
-                     slippage_per_side_pct=0.05):
+                     slippage_per_side_pct=0.05, spread_per_side_pct=0.125):
     if entry_price <= 0 or exit_price <= 0 or direction not in (-1, 1):
         raise ValueError("Invalid event-study price or direction")
     gross = direction * (exit_price / entry_price - 1.0) * 100.0
-    round_trip_cost = 2.0 * (float(fee_per_side_pct) + float(slippage_per_side_pct))
+    costs = (float(fee_per_side_pct), float(slippage_per_side_pct), float(spread_per_side_pct))
+    if any(value < 0 for value in costs):
+        raise ValueError("Transaction-cost assumptions cannot be negative")
+    round_trip_cost = 2.0 * sum(costs)
     return gross - round_trip_cost
 
 
@@ -117,7 +188,7 @@ def _split_for_index(index, count):
 
 
 def event_study(symbol, timeframe, candles, cfg, fee_per_side_pct=0.10,
-                slippage_per_side_pct=0.05):
+                slippage_per_side_pct=0.05, spread_per_side_pct=0.125):
     enriched = enrich(candles)
     if "quote_volume" not in enriched.columns:
         raise ValueError("Historical candles lack quote_volume; live liquidity filter cannot be approximated.")
@@ -130,8 +201,12 @@ def event_study(symbol, timeframe, candles, cfg, fee_per_side_pct=0.10,
         if float(enriched.iloc[index]["quote_volume_24h_usdt"]) < minimum_quote_volume:
             continue
         split, split_end = _split_for_index(index, len(enriched))
+        # All current rules need at most 55 closed candles (SMA50 plus
+        # previous-candle and breakout context); bound the window to avoid
+        # quadratic work over multi-year datasets.
+        point_in_time_window = enriched.iloc[max(0, index - 54):index + 1]
         alerts = run_market_agents_enriched(
-            symbol, timeframe, enriched.iloc[:index + 1], cfg
+            symbol, timeframe, point_in_time_window, cfg
         )
         for alert in alerts:
             direction = signal_direction(alert)
@@ -143,7 +218,8 @@ def event_study(symbol, timeframe, candles, cfg, fee_per_side_pct=0.10,
                 entry = float(enriched.iloc[entry_index]["open"])
                 exit_price = float(enriched.iloc[exit_index]["close"])
                 net = net_event_return(
-                    entry, exit_price, direction, fee_per_side_pct, slippage_per_side_pct
+                    entry, exit_price, direction, fee_per_side_pct,
+                    slippage_per_side_pct, spread_per_side_pct
                 )
                 records.append({
                     "symbol": symbol,
@@ -158,7 +234,7 @@ def event_study(symbol, timeframe, candles, cfg, fee_per_side_pct=0.10,
                     "entry_price": entry,
                     "exit_price": exit_price,
                     "gross_return_pct": direction * (exit_price / entry - 1.0) * 100.0,
-                    "estimated_round_trip_cost_pct": 2.0 * (fee_per_side_pct + slippage_per_side_pct),
+                    "estimated_round_trip_cost_pct": 2.0 * (fee_per_side_pct + slippage_per_side_pct + spread_per_side_pct),
                     "net_return_pct": net,
                     "split": split,
                 })
@@ -187,7 +263,8 @@ def summarize_events(records):
     return summary
 
 
-def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05):
+def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
+        spread_per_side_pct=0.125):
     cfg = load_config()
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=int(days))
@@ -211,7 +288,7 @@ def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05):
                 candles.to_csv(path, index=False)
                 records = event_study(
                     symbol, timeframe, candles, cfg,
-                    fee_per_side_pct, slippage_per_side_pct,
+                    fee_per_side_pct, slippage_per_side_pct, spread_per_side_pct,
                 )
                 all_records.extend(records)
                 dataset_manifest.append({
@@ -223,6 +300,11 @@ def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05):
                 log.info("Backtest dataset validado: %s %s; candles=%d; eventos=%d.",
                          symbol, timeframe, len(candles), len(records))
             except Exception as exc:
+                # Never let a previous successful download masquerade as the
+                # current failed sample in the subsequent portfolio simulation.
+                stale_path = data_dir / f"{symbol}_{timeframe}.csv"
+                if stale_path.exists():
+                    stale_path.unlink()
                 dataset_manifest.append({
                     "symbol": symbol, "timeframe": timeframe, "status": "invalid",
                     "reason": f"{type(exc).__name__}: {str(exc)[:200]}",
@@ -239,10 +321,11 @@ def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05):
         "days_requested": int(days),
         "fee_per_side_pct_assumption": fee_per_side_pct,
         "slippage_per_side_pct_assumption": slippage_per_side_pct,
-        "round_trip_cost_pct_assumption": 2 * (fee_per_side_pct + slippage_per_side_pct),
+        "spread_per_side_pct_assumption": spread_per_side_pct,
+        "round_trip_cost_pct_assumption": 2 * (fee_per_side_pct + slippage_per_side_pct + spread_per_side_pct),
         "horizons_bars": list(HORIZONS),
         "splits": {"train": "first 60%", "validation": "next 20%", "test": "last 20%"},
-        "historical_market_filter": "24h quote volume is approximated from candle quote_volume; historical bid/ask spread is unavailable and therefore not reconstructed. Results are not an exact replay of live symbol eligibility.",
+        "historical_market_filter": "24h quote volume is approximated from candle quote_volume; historical bid/ask spread is unavailable. A conservative 0.125% per-side spread proxy is applied by default (half the live 0.25% maximum-spread filter), not represented as observed historical spread.",
         "warning": "Signals are evaluated independently and may overlap. Bullish outcomes are Spot-long directional studies; bearish outcomes are inverse directional research, not short-selling trades and not executable on Binance Spot. Results are not portfolio returns or calibrated probabilities.",
         "summary": summary,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -258,9 +341,12 @@ if __name__ == "__main__":
     parser.add_argument("--days", type=int, default=1460)
     parser.add_argument("--fee-per-side-pct", type=float, default=0.10)
     parser.add_argument("--slippage-per-side-pct", type=float, default=0.05)
+    parser.add_argument("--spread-per-side-pct", type=float, default=0.125,
+                        help="Conservative estimated spread cost per side, in percent")
     args = parser.parse_args()
     if args.days < 60 or args.days > 1460:
         parser.error("--days must be between 60 and 1460")
-    if args.fee_per_side_pct < 0 or args.slippage_per_side_pct < 0:
+    if min(args.fee_per_side_pct, args.slippage_per_side_pct, args.spread_per_side_pct) < 0:
         parser.error("cost assumptions cannot be negative")
-    raise SystemExit(run(args.days, args.fee_per_side_pct, args.slippage_per_side_pct))
+    raise SystemExit(run(args.days, args.fee_per_side_pct, args.slippage_per_side_pct,
+                         args.spread_per_side_pct))

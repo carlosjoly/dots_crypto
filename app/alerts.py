@@ -201,6 +201,12 @@ def format_message(alert):
     candle_time = _time_brasilia(alert.get("candle_time_utc"))
 
     reason_lines = "\n".join(f"- {item}" for item in reasons)
+    validation_status_line = (
+        "STATUS: EXPERIMENTAL — NÃO APROVADO PARA EXECUÇÃO."
+        if alert.get("validation_status") == "experimental"
+        or alert.get("execution_eligible") is False else ""
+    )
+    validation_status_block = f"{validation_status_line}\n\n" if validation_status_line else ""
     reference_lines = []
     if invalidation is not None:
         reference_lines.append(f"- Invalidação: US$ {_number(invalidation, 2)}.")
@@ -270,7 +276,8 @@ def format_message(alert):
         f"Motivos:\n{reason_lines}\n\n"
         f"Referências técnicas:\n{chr(10).join(reference_lines)}"
         f"{extra_section}\n\n"
-        f"CONFIANÇA: {confidence}.\n\n"
+        f"CONFIANÇA: {confidence}.\n"
+        f"{validation_status_block}"
         f"RISCO: {risk}\n\n"
         f"Horário da coleta: {candle_time}.\n\n"
         "Alerta exclusivamente informativo. Não constitui recomendação de investimento, "

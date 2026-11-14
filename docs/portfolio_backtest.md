@@ -11,8 +11,8 @@ The historical workflow now runs two distinct analyses:
 - Stops are set at 1.5 ATR and targets at 1.5R by default.
 - If stop and target are both touched inside one candle, the stop is assumed to execute first.
 - Gaps through stop/target use the candle open as the execution reference.
-- Fees and slippage are charged on both entry and exit; defaults are 0.10% and 0.05% per side.
-- Risk budget is 1% of current equity per position; aggregate exposure is capped at 80%, with at most five simultaneous positions.
+- Fees, slippage and a conservative spread proxy are charged on both entry and exit; defaults are 0.10%, 0.05% and 0.125% per side (0.55% estimated round trip). Historical bid/ask is unavailable in OHLCV data, so the spread is an explicit stress assumption, not an observed historical quote.
+- Risk budget is 1% of current equity per position, with estimated fees, spread and slippage included in stop-risk sizing; aggregate exposure is capped at 80%, with at most five simultaneous positions.
 - Positions are liquidated at the end of each chronological split. No position crosses from train to validation or test.
 - Buy & Hold is an equal-weight benchmark over the same symbols and exact split, including the same fee and slippage assumptions.
 
@@ -26,8 +26,8 @@ The historical workflow now runs two distinct analyses:
 
 ## Acceptance gate and interpretation
 
-The workflow fails if any agent/timeframe has no trades or a non-positive net return in the final 20% test segment. Training or validation returns cannot satisfy this gate.
+The workflow fails closed unless every configured symbol/timeframe dataset is valid and contiguous. Every Spot-long strategy/timeframe test row must contain at least 50 trades, positive net return, positive excess versus equal-weight Buy & Hold, profit factor above 1 and maximum drawdown no worse than -20% in the final 20% test segment. Training or validation returns cannot satisfy this gate.
 
-A positive test return is a minimum engineering gate, not proof of durable profitability. Compare the strategy with Buy & Hold, inspect drawdown and trade count, then run paper trading. Historical candle quote volume is only an approximation of the live liquidity filter; historical bid/ask spread is unavailable in these data.
+A positive test return is a minimum engineering gate, not proof of durable profitability. Compare the strategy with Buy & Hold, inspect drawdown and trade count, then run paper trading. Historical candle quote volume is only an approximation of the live liquidity filter. Internal missing candles are recovered only from exact public kline records; unresolved gaps invalidate the dataset, and stale files from prior runs are removed. Historical bid/ask spread is unavailable and is modelled with the explicit proxy above.
 
 Bearish signals are simulated as synthetic short positions to test direction. They are research-only and are not executable on Binance Spot. The project remains alert-only and never submits orders.

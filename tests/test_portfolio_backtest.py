@@ -5,7 +5,8 @@ import pandas as pd
 from app.historical_backtest import signal_direction
 from app.indicators import rsi
 from app.portfolio_backtest import (chronological_bounds, simulate_portfolio,
-                                    filter_events_by_market_mode, failed_spot_long_test_rows, benchmark_for_market_mode)
+                                    filter_events_by_market_mode, failed_spot_long_test_rows,
+                                    benchmark_for_market_mode, validate_candle_frame)
 
 
 class SafeSignalDirectionTests(unittest.TestCase):
@@ -69,12 +70,33 @@ class MarketModeSeparationTests(unittest.TestCase):
         rows = [{
             "split": "test", "market_mode": "spot_long",
             "agent": "Bot A — Altas expressivas", "timeframe": "1h",
-            "trades": 49, "total_return_pct": 2.0,
+            "trades": 49, "total_return_pct": 2.0, "excess_vs_benchmark_pct": 1.0,
+            "profit_factor": 1.2, "max_drawdown_pct": -5.0,
         }]
         self.assertEqual(len(failed_spot_long_test_rows(rows)), 1)
         rows[0]["trades"] = 50
         self.assertEqual(failed_spot_long_test_rows(rows), [])
 
+
+    def test_profitability_gate_requires_return_benchmark_profit_factor_and_drawdown(self):
+        base = {
+            "split": "test", "market_mode": "spot_long",
+            "agent": "Bot C — Reversões", "timeframe": "1h",
+            "trades": 60, "total_return_pct": 3.0,
+            "excess_vs_benchmark_pct": 1.0, "profit_factor": 1.2,
+            "max_drawdown_pct": -10.0,
+        }
+        self.assertEqual(failed_spot_long_test_rows([base]), [])
+        for field, value in (
+            ("total_return_pct", 0.0),
+            ("excess_vs_benchmark_pct", -0.1),
+            ("profit_factor", 0.9),
+            ("max_drawdown_pct", -21.0),
+            ("trades", 49),
+        ):
+            candidate = dict(base, **{field: value})
+            with self.subTest(field=field):
+                self.assertEqual(len(failed_spot_long_test_rows([candidate])), 1)
 
     def test_spot_long_uses_buy_hold_and_short_research_uses_cash(self):
         frame = pd.DataFrame([
@@ -84,10 +106,10 @@ class MarketModeSeparationTests(unittest.TestCase):
         frames = {"BTCUSDT": frame}
         starts, ends = {"BTCUSDT": 0}, {"BTCUSDT": 2}
         long_benchmark, long_name = benchmark_for_market_mode(
-            "spot_long", frames, starts, ends, 10000, 0, 0
+            "spot_long", frames, starts, ends, 10000, 0, 0, spread_per_side_pct=0
         )
         short_benchmark, short_name = benchmark_for_market_mode(
-            "short_research", frames, starts, ends, 10000, 0, 0
+            "short_research", frames, starts, ends, 10000, 0, 0, spread_per_side_pct=0
         )
         self.assertEqual(long_name, "equal_weight_buy_and_hold")
         self.assertEqual(long_benchmark["total_return_pct"], 10.0)
@@ -115,6 +137,35 @@ class RsiEdgeCaseTests(unittest.TestCase):
             rsi(pd.Series([1.0, 2.0]), period=0)
 
 
+class HistoricalCandleValidationTests(unittest.TestCase):
+    def test_contiguous_ohlcv_history_is_accepted(self):
+        frame = pd.DataFrame([
+            {"open_time": "2026-01-01T00:00:00Z", "open": 100.0, "high": 102.0,
+             "low": 99.0, "close": 101.0, "volume": 10.0, "quote_volume": 1000.0,
+             "close_time": "2026-01-01T00:14:59Z"},
+            {"open_time": "2026-01-01T00:15:00Z", "open": 101.0, "high": 103.0,
+             "low": 100.0, "close": 102.0, "volume": 11.0, "quote_volume": 1100.0,
+             "close_time": "2026-01-01T00:29:59Z"},
+        ])
+        frame["open_time"] = pd.to_datetime(frame["open_time"], utc=True)
+        frame["close_time"] = pd.to_datetime(frame["close_time"], utc=True)
+        self.assertIs(validate_candle_frame(frame, "BTCUSDT", "15m"), frame)
+
+    def test_gap_in_historical_candles_is_rejected(self):
+        frame = pd.DataFrame([
+            {"open_time": "2026-01-01T00:00:00Z", "open": 100.0, "high": 102.0,
+             "low": 99.0, "close": 101.0, "volume": 10.0, "quote_volume": 1000.0,
+             "close_time": "2026-01-01T00:14:59Z"},
+            {"open_time": "2026-01-01T00:30:00Z", "open": 101.0, "high": 103.0,
+             "low": 100.0, "close": 102.0, "volume": 11.0, "quote_volume": 1100.0,
+             "close_time": "2026-01-01T00:44:59Z"},
+        ])
+        frame["open_time"] = pd.to_datetime(frame["open_time"], utc=True)
+        frame["close_time"] = pd.to_datetime(frame["close_time"], utc=True)
+        with self.assertRaisesRegex(ValueError, "missing or irregular"):
+            validate_candle_frame(frame, "BTCUSDT", "15m")
+
+
 class PortfolioSimulationTests(unittest.TestCase):
     @staticmethod
     def frame(rows):
@@ -132,7 +183,7 @@ class PortfolioSimulationTests(unittest.TestCase):
             {"BTCUSDT": frame},
             [{"symbol": "BTCUSDT", "entry_index": 0, "direction": 1, "atr": 2.0}],
             {"BTCUSDT": 0}, {"BTCUSDT": 1}, initial_cash=10000,
-            fee_per_side_pct=0, slippage_per_side_pct=0,
+            fee_per_side_pct=0, slippage_per_side_pct=0, spread_per_side_pct=0,
         )
         self.assertEqual(result["trades"][0]["exit_reason"], "stop")
         self.assertLess(result["trades"][0]["net_pnl"], 0)
@@ -165,6 +216,33 @@ class PortfolioSimulationTests(unittest.TestCase):
         self.assertEqual(result["trades"][0]["direction"], "short")
         self.assertEqual(result["trades"][0]["exit_reason"], "target")
         self.assertGreater(result["trades"][0]["net_pnl"], 0)
+
+    def test_spread_proxy_increases_adverse_execution_cost(self):
+        frame = self.frame([{
+            "open_time": "2026-01-01T00:00:00Z", "open": 100.0,
+            "high": 101.0, "low": 95.0, "close": 98.0,
+        }])
+        args = (
+            {"BTCUSDT": frame},
+            [{"symbol": "BTCUSDT", "entry_index": 0, "direction": 1, "atr": 2.0}],
+            {"BTCUSDT": 0}, {"BTCUSDT": 1},
+        )
+        no_spread = simulate_portfolio(
+            *args, initial_cash=10000, fee_per_side_pct=0,
+            slippage_per_side_pct=0, spread_per_side_pct=0,
+        )
+        with_spread = simulate_portfolio(
+            *args, initial_cash=10000, fee_per_side_pct=0,
+            slippage_per_side_pct=0, spread_per_side_pct=0.125,
+        )
+        self.assertLess(
+            with_spread["trades"][0]["net_pnl"],
+            no_spread["trades"][0]["net_pnl"],
+        )
+        self.assertLess(
+            with_spread["trades"][0]["quantity"],
+            no_spread["trades"][0]["quantity"],
+        )
 
     def test_splits_are_chronological_and_non_overlapping(self):
         bounds = chronological_bounds(100)

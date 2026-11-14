@@ -12,7 +12,9 @@ def _alert(agent, symbol, tf, row, signal, reason, confidence="não calibrada"):
         "atr": round(float(row["atr14"]), 8) if row.get("atr14") == row.get("atr14") else None,
         "candle_time_utc": str(row["close_time"]),
         "confidence": confidence,
-        "risk_note": "Heurística inicial, ainda não validada por backtest; confirme spread, custos, liquidez e contexto."
+        "risk_note": "Heurística experimental; não aprovada para execução. Confirme spread, custos, liquidez e contexto.",
+        "validation_status": "experimental",
+        "execution_eligible": False,
     }
 
 def run_market_agents(symbol, tf, df, cfg):
@@ -36,12 +38,23 @@ def run_market_agents_enriched(symbol, tf, d, cfg):
     if change <= -move_threshold and rv >= t["relative_volume"]:
         out.append(_alert("Bot B — Quedas expressivas", symbol, tf, r, "movimento de baixa",
                           f"Variação negativa de {change:.2f}% com volume relativo {rv:.2f}x. Não implica venda."))
-    if r["rsi14"] < t["rsi_oversold"] and r["close"] > prev["close"] and r["volume"] > prev["volume"]:
+    reversal_volume = float(t.get("reversal_relative_volume", 1.5))
+    # Require an actual RSI threshold cross plus price-structure confirmation.
+    # A single green/red candle inside an extreme RSI zone is not a reversal.
+    if (float(prev["rsi14"]) <= float(t["rsi_oversold"])
+            and float(r["rsi14"]) > float(t["rsi_oversold"])
+            and float(r["close"]) > float(prev["high"])
+            and float(r["close"]) > float(r["open"])
+            and float(rv) >= reversal_volume):
         out.append(_alert("Bot C — Reversões", symbol, tf, r, "possível estabilização após sobrevenda",
-                          "RSI baixo e candle recente positivo com volume superior ao candle anterior; reversão não confirmada."))
-    if r["rsi14"] > t["rsi_overbought"] and r["close"] < prev["close"] and r["volume"] > prev["volume"]:
+                          "RSI cruzou acima da sobrevenda e o preço confirmou a máxima anterior com volume relativo suficiente; ainda é sinal experimental."))
+    if (float(prev["rsi14"]) >= float(t["rsi_overbought"])
+            and float(r["rsi14"]) < float(t["rsi_overbought"])
+            and float(r["close"]) < float(prev["low"])
+            and float(r["close"]) < float(r["open"])
+            and float(rv) >= reversal_volume):
         out.append(_alert("Bot C — Reversões", symbol, tf, r, "possível perda de força após sobrecompra",
-                          "RSI alto e candle recente negativo com volume superior ao candle anterior; reversão não confirmada."))
+                          "RSI cruzou abaixo da sobrecompra e o preço confirmou a mínima anterior com volume relativo suficiente; ainda é sinal experimental."))
     lookback = int(t["breakout_lookback"])
     prior = d.iloc[-lookback-1:-1]
     # Emit a breakout only on the crossing candle, not on every candle that
@@ -66,14 +79,22 @@ def run_market_agents_enriched(symbol, tf, d, cfg):
         float(t.get("breakout_rsi_short_min", 25))
         <= float(r["rsi14"]) <= float(t.get("breakout_rsi_short_max", 50))
     )
-    if (crossed_resistance and rv >= t["relative_volume"] and breakout_rsi_long
+    bullish_regime = float(r["close"]) > float(r["sma20"]) > float(r["sma50"])
+    bearish_regime = float(r["close"]) < float(r["sma20"]) < float(r["sma50"])
+    bullish_candle = float(r["close"]) > float(r["open"])
+    bearish_candle = float(r["close"]) < float(r["open"])
+    if (crossed_resistance and bullish_regime and bullish_candle
+            and rv >= max(float(t["relative_volume"]), float(t.get("breakout_relative_volume", 2.0)))
+            and breakout_rsi_long
             and float(r["close"]) > float(prior["high"].max()) + breakout_buffer):
         out.append(_alert("Bot D — Rompimentos", symbol, tf, r, "possível rompimento de resistência",
-                          f"Fecho ultrapassou a máxima das {lookback} velas por mais de {breakout_buffer:.8g} (0,10 ATR), com volume relativo {rv:.2f}x e RSI={r['rsi14']:.1f}; confirmar risco de falso rompimento."))
-    if (crossed_support and rv >= t["relative_volume"] and breakout_rsi_short
+                          f"Rompimento acima da máxima das {lookback} velas com tendência alinhada, candle comprador, margem de {breakout_buffer:.8g} (0,10 ATR), volume relativo {rv:.2f}x e RSI={r['rsi14']:.1f}; experimental."))
+    if (crossed_support and bearish_regime and bearish_candle
+            and rv >= max(float(t["relative_volume"]), float(t.get("breakout_relative_volume", 2.0)))
+            and breakout_rsi_short
             and float(r["close"]) < float(prior["low"].min()) - breakout_buffer):
         out.append(_alert("Bot D — Rompimentos", symbol, tf, r, "possível rompimento de suporte",
-                          f"Fecho rompeu a mínima das {lookback} velas por mais de {breakout_buffer:.8g} (0,10 ATR), com volume relativo {rv:.2f}x e RSI={r['rsi14']:.1f}; confirmar risco de falso rompimento."))
+                          f"Rompimento abaixo da mínima das {lookback} velas com tendência alinhada, candle vendedor, margem de {breakout_buffer:.8g} (0,10 ATR), volume relativo {rv:.2f}x e RSI={r['rsi14']:.1f}; experimental."))
     trend_up = r["close"] > r["sma20"] > r["sma50"]
     trend_down = r["close"] < r["sma20"] < r["sma50"]
     previous_trend_up = prev["close"] > prev["sma20"] > prev["sma50"]
@@ -82,68 +103,46 @@ def run_market_agents_enriched(symbol, tf, d, cfg):
     if min_risk_reward <= 0:
         raise ValueError("thresholds.min_risk_reward must be greater than zero")
 
-    if tf == "15m":
-        # A 15m swing entry now requires an established uptrend, an actual
-        # pullback to SMA20, and a bullish reclaim that closes above the
-        # previous candle high. This is deliberately a one-candle trigger.
-        pullback_long = (
-            float(prev["close"]) > float(prev["sma50"])
-            and float(prev["sma20"]) > float(prev["sma50"])
-            and float(prev["low"]) <= float(prev["sma20"])
-            and float(prev["close"]) > float(prev["sma50"])
-        )
-        confirmed_reclaim_long = (
-            trend_up
-            and float(r["close"]) > float(prev["high"])
-            and float(r["close"]) > float(r["sma20"])
-            and float(r["rsi14"]) >= float(t.get("swing_pullback_rsi_min", 45))
-            and float(r["rsi14"]) <= float(t.get("swing_pullback_rsi_max", 65))
-            and float(rv) >= float(t.get("swing_pullback_relative_volume", 1.2))
-        )
-        pullback_short = (
-            float(prev["close"]) < float(prev["sma50"])
-            and float(prev["sma20"]) < float(prev["sma50"])
-            and float(prev["high"]) >= float(prev["sma20"])
-        )
-        confirmed_breakdown_short = (
-            trend_down
-            and float(r["close"]) < float(prev["low"])
-            and float(r["close"]) < float(r["sma20"])
-            and float(r["rsi14"]) >= float(t.get("swing_pullback_short_rsi_min", 35))
-            and float(r["rsi14"]) <= float(t.get("swing_pullback_short_rsi_max", 55))
-            and float(rv) >= float(t.get("swing_pullback_relative_volume", 1.2))
-        )
-        if pullback_long and confirmed_reclaim_long:
-            stop = float(r["close"] - t["atr_stop_multiple"] * r["atr14"])
-            target = float(r["close"] + min_risk_reward * (r["close"] - stop))
-            out.append(_alert("Bot E — Swing trade", symbol, tf, r, "configuração potencial de alta",
-                              f"Recuo à SMA20 seguido de recuperação acima da máxima anterior; RSI={r['rsi14']:.1f}. Invalidação indicativa: {stop:.8g}; objetivo ilustrativo: {target:.8g}."))
-        elif pullback_short and confirmed_breakdown_short:
-            stop = float(r["close"] + t["atr_stop_multiple"] * r["atr14"])
-            target = float(r["close"] - min_risk_reward * (stop - r["close"]))
-            out.append(_alert("Bot E — Swing trade", symbol, tf, r, "configuração potencial de baixa",
-                              f"Reteste à SMA20 seguido de continuação abaixo da mínima anterior; RSI={r['rsi14']:.1f}. Invalidação indicativa: {stop:.8g}; objetivo ilustrativo: {target:.8g}."))
-    else:
-        # Preserve the previous edge-triggered swing rules on 1h/4h so the
-        # experiment isolates the requested 15m change.
-        # On 1h/4h require stronger trend quality, a narrower RSI band and
-        # materially above-average activity. The transition rule prevents
-        # repeated alerts while the setup remains active.
-        min_swing_volume = float(t.get("swing_pullback_relative_volume", 1.2))
-        swing_long = trend_up and 45 <= r["rsi14"] <= 65 and rv >= min_swing_volume
-        previous_swing_long = previous_trend_up and 45 <= prev["rsi14"] <= 65 and prev["rel_volume"] >= min_swing_volume
-        swing_short = trend_down and 35 <= r["rsi14"] <= 55 and rv >= min_swing_volume
-        previous_swing_short = previous_trend_down and 35 <= prev["rsi14"] <= 55 and prev["rel_volume"] >= min_swing_volume
-        if swing_long and not previous_swing_long:
-            stop = float(r["close"] - t["atr_stop_multiple"] * r["atr14"])
-            target = float(r["close"] + min_risk_reward * (r["close"] - stop))
-            out.append(_alert("Bot E — Swing trade", symbol, tf, r, "configuração potencial de alta",
-                              f"Tendência SMA20>SMA50, RSI={r['rsi14']:.1f}; referência técnica, não recomendação. Invalidação indicativa: {stop:.8g}; objetivo ilustrativo: {target:.8g}."))
-        elif swing_short and not previous_swing_short:
-            stop = float(r["close"] + t["atr_stop_multiple"] * r["atr14"])
-            target = float(r["close"] - min_risk_reward * (stop - r["close"]))
-            out.append(_alert("Bot E — Swing trade", symbol, tf, r, "configuração potencial de baixa",
-                              f"Tendência SMA20<SMA50, RSI={r['rsi14']:.1f}; referência técnica, não recomendação. Invalidação indicativa: {stop:.8g}; objetivo ilustrativo: {target:.8g}."))
+    # Apply the same pullback/reclaim structure on every timeframe. Trend-only
+    # transitions on 1h/4h were too permissive and were not supported by the
+    # historical results. Short signals remain research-only on Spot.
+    min_swing_volume = float(t.get("swing_pullback_relative_volume", 1.2))
+    pullback_long = (
+        float(prev["close"]) > float(prev["sma50"])
+        and float(prev["sma20"]) > float(prev["sma50"])
+        and float(prev["low"]) <= float(prev["sma20"])
+    )
+    confirmed_reclaim_long = (
+        trend_up
+        and float(r["close"]) > float(prev["high"])
+        and float(r["close"]) > float(r["sma20"])
+        and float(r["rsi14"]) >= float(t.get("swing_pullback_rsi_min", 45))
+        and float(r["rsi14"]) <= float(t.get("swing_pullback_rsi_max", 65))
+        and float(rv) >= min_swing_volume
+    )
+    pullback_short = (
+        float(prev["close"]) < float(prev["sma50"])
+        and float(prev["sma20"]) < float(prev["sma50"])
+        and float(prev["high"]) >= float(prev["sma20"])
+    )
+    confirmed_breakdown_short = (
+        trend_down
+        and float(r["close"]) < float(prev["low"])
+        and float(r["close"]) < float(r["sma20"])
+        and float(r["rsi14"]) >= float(t.get("swing_pullback_short_rsi_min", 35))
+        and float(r["rsi14"]) <= float(t.get("swing_pullback_short_rsi_max", 55))
+        and float(rv) >= min_swing_volume
+    )
+    if pullback_long and confirmed_reclaim_long:
+        stop = float(r["close"] - t["atr_stop_multiple"] * r["atr14"])
+        target = float(r["close"] + min_risk_reward * (r["close"] - stop))
+        out.append(_alert("Bot E — Swing trade", symbol, tf, r, "configuração potencial de alta",
+                          f"Recuo à SMA20 seguido de recuperação acima da máxima anterior; RSI={r['rsi14']:.1f}. Invalidação indicativa: {stop:.8g}; objetivo ilustrativo: {target:.8g}."))
+    elif pullback_short and confirmed_breakdown_short:
+        stop = float(r["close"] + t["atr_stop_multiple"] * r["atr14"])
+        target = float(r["close"] - min_risk_reward * (stop - r["close"]))
+        out.append(_alert("Bot E — Swing trade", symbol, tf, r, "configuração potencial de baixa",
+                          f"Reteste à SMA20 seguido de continuação abaixo da mínima anterior; RSI={r['rsi14']:.1f}. Invalidação indicativa: {stop:.8g}; objetivo ilustrativo: {target:.8g}."))
     return out
 
 def disabled_agent_status(cfg=None):

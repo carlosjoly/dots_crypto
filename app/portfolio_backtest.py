@@ -39,6 +39,42 @@ def chronological_bounds(count):
             "test": (validation_end, count)}
 
 
+TIMEFRAME_INTERVALS = {
+    "15m": pd.Timedelta(minutes=15),
+    "1h": pd.Timedelta(hours=1),
+    "4h": pd.Timedelta(hours=4),
+}
+
+
+def validate_candle_frame(frame, symbol, timeframe):
+    """Fail closed on incomplete, malformed or non-contiguous OHLCV history."""
+    if timeframe not in TIMEFRAME_INTERVALS:
+        raise ValueError(f"Unsupported timeframe: {timeframe}")
+    required = ["open_time", "close_time", "open", "high", "low", "close", "volume", "quote_volume"]
+    missing = [column for column in required if column not in frame.columns]
+    if missing:
+        raise ValueError(f"Missing historical columns for {symbol} {timeframe}: {missing}")
+    if frame.empty or frame["open_time"].isna().any() or frame["close_time"].isna().any():
+        raise ValueError(f"Empty or invalid historical timestamps: {symbol} {timeframe}")
+    if frame["open_time"].duplicated().any() or not frame["open_time"].is_monotonic_increasing:
+        raise ValueError(f"Invalid candle ordering: {symbol} {timeframe}")
+    numeric = frame[["open", "high", "low", "close", "volume", "quote_volume"]].to_numpy(dtype=float)
+    if not np.isfinite(numeric).all():
+        raise ValueError(f"Non-finite OHLCV values: {symbol} {timeframe}")
+    prices = frame[["open", "high", "low", "close"]]
+    if (prices <= 0).any().any() or (frame[["volume", "quote_volume"]] < 0).any().any():
+        raise ValueError(f"Out-of-range OHLCV values: {symbol} {timeframe}")
+    if (frame["high"] < prices[["open", "close", "low"]].max(axis=1)).any():
+        raise ValueError(f"Invalid candle high: {symbol} {timeframe}")
+    if (frame["low"] > prices[["open", "close", "high"]].min(axis=1)).any():
+        raise ValueError(f"Invalid candle low: {symbol} {timeframe}")
+    if not frame["open_time"].diff().dropna().eq(TIMEFRAME_INTERVALS[timeframe]).all():
+        raise ValueError(f"Historical sample contains missing or irregular candles: {symbol} {timeframe}")
+    if (frame["close_time"] <= frame["open_time"]).any():
+        raise ValueError(f"Invalid candle close_time: {symbol} {timeframe}")
+    return frame
+
+
 def _exit_trade(symbol, position, bar, reason, fee_rate, slip_rate):
     direction = position["direction"]
     reference = float(bar["close"])
@@ -83,7 +119,7 @@ def simulate_portfolio(frames, events, starts, ends, initial_cash=10000.0,
                        fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
                        risk_fraction=0.01, max_exposure_fraction=0.80,
                        max_positions=5, stop_atr_multiple=1.5, reward_risk=1.5,
-                       timeframe="15m"):
+                       timeframe="15m", spread_per_side_pct=0.125):
     """Run one agent's multi-symbol portfolio; concurrent positions are allowed."""
     if initial_cash <= 0 or not 0 < risk_fraction <= 0.05:
         raise ValueError("initial_cash must be positive and risk_fraction must be in (0, 0.05].")
@@ -91,7 +127,12 @@ def simulate_portfolio(frames, events, starts, ends, initial_cash=10000.0,
         raise ValueError("Invalid exposure or max_positions.")
     if stop_atr_multiple <= 0 or reward_risk <= 0:
         raise ValueError("Stop and reward/risk multiples must be positive.")
-    fee, slip = fee_per_side_pct / 100.0, slippage_per_side_pct / 100.0
+    if min(fee_per_side_pct, slippage_per_side_pct, spread_per_side_pct) < 0:
+        raise ValueError("Transaction-cost assumptions cannot be negative")
+    fee = fee_per_side_pct / 100.0
+    # OHLC history has no historical bid/ask. Add a conservative half-spread
+    # proxy per side to adverse slippage rather than pretending spread is zero.
+    slip = (slippage_per_side_pct + spread_per_side_pct) / 100.0
     cash, positions, marks = float(initial_cash), {}, {}
     trades, curve = [], []
     bars_at_time, events_at_time = defaultdict(dict), defaultdict(list)
@@ -148,11 +189,15 @@ def simulate_portfolio(frames, events, starts, ends, initial_cash=10000.0,
             entry = opening * (1 + slip if direction == 1 else 1 - slip)
             stop = entry - direction * distance
             target = entry + direction * distance * reward_risk
+            # Size against the stop loss including round-trip fees and adverse
+            # spread/slippage, not ATR distance alone.
+            estimated_cost_per_unit = (entry + stop) * (fee + slip)
+            risk_per_unit = distance + estimated_cost_per_unit
             equity = max(0.0, _mark_equity(cash, positions, marks))
             exposure = sum(p["quantity"] * marks.get(s, p["entry_price"]) for s, p in positions.items())
             remaining = max(0.0, equity * max_exposure_fraction - exposure)
             per_position_cap = equity * max_exposure_fraction / max_positions
-            quantity = min(equity * risk_fraction / distance,
+            quantity = min(equity * risk_fraction / risk_per_unit,
                            per_position_cap / entry, remaining / entry)
             if quantity <= 0:
                 continue
@@ -220,8 +265,12 @@ def simulate_portfolio(frames, events, starts, ends, initial_cash=10000.0,
     return {"metrics": metrics, "trades": trades, "equity_curve": curve}
 
 
-def buy_and_hold_benchmark(frames, starts, ends, initial_cash, fee_per_side_pct, slippage_per_side_pct):
-    fee, slip = fee_per_side_pct / 100.0, slippage_per_side_pct / 100.0
+def buy_and_hold_benchmark(frames, starts, ends, initial_cash, fee_per_side_pct,
+                           slippage_per_side_pct, spread_per_side_pct=0.125):
+    if min(fee_per_side_pct, slippage_per_side_pct, spread_per_side_pct) < 0:
+        raise ValueError("Transaction-cost assumptions cannot be negative")
+    fee = fee_per_side_pct / 100.0
+    slip = (slippage_per_side_pct + spread_per_side_pct) / 100.0
     symbols = [s for s in frames if int(ends[s]) > int(starts[s])]
     if not symbols:
         return {"final_equity": initial_cash, "total_return_pct": 0.0, "by_symbol": {}}
@@ -291,13 +340,14 @@ def filter_events_by_market_mode(events, market_mode):
 
 
 def benchmark_for_market_mode(market_mode, frames, starts, ends, initial_cash,
-                              fee_per_side_pct, slippage_per_side_pct):
+                              fee_per_side_pct, slippage_per_side_pct,
+                              spread_per_side_pct=0.125):
     """Use a comparable benchmark for each market mode."""
     if market_mode == "spot_long":
         return (
             buy_and_hold_benchmark(
                 frames, starts, ends, initial_cash,
-                fee_per_side_pct, slippage_per_side_pct,
+                fee_per_side_pct, slippage_per_side_pct, spread_per_side_pct,
             ),
             "equal_weight_buy_and_hold",
         )
@@ -317,22 +367,29 @@ def failed_spot_long_test_rows(summaries):
         and row["market_mode"] == "spot_long"
         and row["agent"] in SPOT_LONG_GATE_AGENTS
     ]
-    min_bot_a_test_trades = 50
-    return [
-        row for row in rows
-        if int(row["trades"]) == 0
-        or float(row["total_return_pct"]) <= 0
-        or (
-            row["agent"] == "Bot A — Altas expressivas"
-            and int(row["trades"]) < min_bot_a_test_trades
+    minimum_test_trades = 50
+    max_acceptable_drawdown_pct = 20.0
+    def passes(row):
+        profit_factor = row.get("profit_factor")
+        profit_factor_ok = (
+            profit_factor == "infinity"
+            or (profit_factor is not None and math.isfinite(float(profit_factor))
+                and float(profit_factor) > 1.0)
         )
-    ]
+        return (
+            int(row.get("trades", 0)) >= minimum_test_trades
+            and float(row.get("total_return_pct", 0.0)) > 0.0
+            and float(row.get("excess_vs_benchmark_pct", 0.0)) > 0.0
+            and profit_factor_ok
+            and float(row.get("max_drawdown_pct", -100.0)) >= -max_acceptable_drawdown_pct
+        )
+    return [row for row in rows if not passes(row)]
 
 
 def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
         initial_cash=10000.0, risk_fraction=0.01, max_exposure_fraction=0.80,
         max_positions=5, stop_atr_multiple=1.5, reward_risk=1.5,
-        require_positive_test=True):
+        require_positive_test=True, spread_per_side_pct=0.125):
     cfg = load_config()
     root = Path(cfg["_root"])
     historical_dir, output_dir = root / "data" / "historical", root / "data" / "backtest"
@@ -347,14 +404,21 @@ def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
             if not path.exists():
                 manifest.append({"symbol": symbol, "timeframe": timeframe, "status": "missing"})
                 continue
-            frame = pd.read_csv(path)
-            frame["open_time"] = pd.to_datetime(frame["open_time"], utc=True)
-            frame["close_time"] = pd.to_datetime(frame["close_time"], utc=True)
-            for col in ("open", "high", "low", "close", "volume", "quote_volume"):
-                frame[col] = pd.to_numeric(frame[col], errors="raise")
-            if frame["open_time"].duplicated().any() or not frame["open_time"].is_monotonic_increasing:
-                raise ValueError(f"Invalid candle ordering: {symbol} {timeframe}")
-            data, events = _make_events(symbol, timeframe, frame, cfg)
+            try:
+                frame = pd.read_csv(path)
+                frame["open_time"] = pd.to_datetime(frame["open_time"], utc=True)
+                frame["close_time"] = pd.to_datetime(frame["close_time"], utc=True)
+                for col in ("open", "high", "low", "close", "volume", "quote_volume"):
+                    frame[col] = pd.to_numeric(frame[col], errors="raise")
+                validate_candle_frame(frame, symbol, timeframe)
+                data, events = _make_events(symbol, timeframe, frame, cfg)
+            except Exception as exc:
+                manifest.append({
+                    "symbol": symbol, "timeframe": timeframe, "status": "invalid",
+                    "reason": f"{type(exc).__name__}: {str(exc)[:200]}",
+                })
+                log.exception("Dataset histórico rejeitado na carteira: %s %s", symbol, timeframe)
+                continue
             frames[symbol] = data.reset_index(drop=True)
             for agent, rows in events.items():
                 events_by_agent[agent].extend(rows)
@@ -378,10 +442,11 @@ def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
                         frames, selected, starts, ends, initial_cash, fee_per_side_pct,
                         slippage_per_side_pct, risk_fraction, max_exposure_fraction,
                         max_positions, stop_atr_multiple, reward_risk, timeframe,
+                        spread_per_side_pct=spread_per_side_pct,
                     )
                     bh, benchmark_name = benchmark_for_market_mode(
                         market_mode, frames, starts, ends, initial_cash,
-                        fee_per_side_pct, slippage_per_side_pct,
+                        fee_per_side_pct, slippage_per_side_pct, spread_per_side_pct,
                     )
                     buy_hold_return = bh["total_return_pct"] if market_mode == "spot_long" else None
                     row = dict(sim["metrics"])
@@ -436,7 +501,12 @@ def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
         and row["agent"] in SPOT_LONG_GATE_AGENTS
     ]
     failed = failed_spot_long_test_rows(summaries)
-    gate_passed = bool(test_rows) and not failed
+    expected_datasets = len(cfg["exchange"]["symbols"]) * len(cfg["exchange"]["timeframes"])
+    datasets_complete = (
+        len(manifest) == expected_datasets
+        and all(item.get("status") == "valid" for item in manifest)
+    )
+    gate_passed = bool(test_rows) and datasets_complete and not failed
     report = {
         "method": "separate_spot_long_and_synthetic_short_portfolios",
         "days_requested": days,
@@ -447,7 +517,13 @@ def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
         "execution": {
             "entry": "next candle open after closed signal",
             "intrabar": "stop first if stop and target both hit",
-            "fees_and_slippage": "charged on entry and exit",
+            "fees_slippage_and_spread": {
+                "fee_per_side_pct": fee_per_side_pct,
+                "slippage_per_side_pct": slippage_per_side_pct,
+                "spread_proxy_per_side_pct": spread_per_side_pct,
+                "round_trip_assumption_pct": 2 * (fee_per_side_pct + slippage_per_side_pct + spread_per_side_pct),
+                "spread_note": "Historical bid/ask is unavailable in OHLC candles; spread is an explicit conservative proxy, not observed historical data."
+            },
             "positions": "simultaneous across symbols within each agent and market mode",
             "split_liquidation": "open positions closed at final candle of each split",
         },
@@ -465,7 +541,15 @@ def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
         "test_gate": {
             "required": require_positive_test,
             "scope": "spot_long only; Bots A, C, D and E. Bot B remains a downside/risk alert, not a Spot-long candidate.",
-            "bot_a_minimum_test_trades": 50,
+            "minimum_test_trades_per_agent_timeframe": 50,
+            "required_conditions": [
+                "at least 50 out-of-sample trades", "positive net return",
+                "outperform equal-weight Buy & Hold", "profit factor > 1",
+                "maximum drawdown no worse than -20%", "all configured datasets valid and contiguous",
+            ],
+            "datasets_complete": datasets_complete,
+            "expected_datasets": expected_datasets,
+            "valid_datasets": sum(item.get("status") == "valid" for item in manifest),
             "passed": gate_passed,
             "evaluated_combinations": len(test_rows),
             "failed": [
@@ -484,7 +568,7 @@ def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
         "Portfolio backtest: %d combinações; %d Spot-long no teste; %d reprovadas no gate.",
         len(summaries), len(test_rows), len(failed),
     )
-    return 1 if require_positive_test and (not test_rows or failed) else 0
+    return 1 if require_positive_test and (not test_rows or not datasets_complete or failed) else 0
 
 
 if __name__ == "__main__":
@@ -492,6 +576,7 @@ if __name__ == "__main__":
     parser.add_argument("--days", type=int, default=1460)
     parser.add_argument("--fee-per-side-pct", type=float, default=0.10)
     parser.add_argument("--slippage-per-side-pct", type=float, default=0.05)
+    parser.add_argument("--spread-per-side-pct", type=float, default=0.125)
     parser.add_argument("--initial-cash", type=float, default=10000.0)
     parser.add_argument("--risk-fraction", type=float, default=0.01)
     parser.add_argument("--max-exposure-fraction", type=float, default=0.80)
@@ -500,9 +585,9 @@ if __name__ == "__main__":
     parser.add_argument("--reward-risk", type=float, default=1.5)
     parser.add_argument("--allow-non-positive-test", action="store_true")
     args = parser.parse_args()
-    if not 60 <= args.days <= 1460 or min(args.fee_per_side_pct, args.slippage_per_side_pct) < 0:
+    if not 60 <= args.days <= 1460 or min(args.fee_per_side_pct, args.slippage_per_side_pct, args.spread_per_side_pct) < 0:
         parser.error("Invalid days or transaction-cost assumptions.")
     raise SystemExit(run(args.days, args.fee_per_side_pct, args.slippage_per_side_pct,
                          args.initial_cash, args.risk_fraction, args.max_exposure_fraction,
                          args.max_positions, args.stop_atr_multiple, args.reward_risk,
-                         not args.allow_non_positive_test))
+                         not args.allow_non_positive_test, args.spread_per_side_pct))
