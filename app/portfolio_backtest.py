@@ -83,7 +83,7 @@ def simulate_portfolio(frames, events, starts, ends, initial_cash=10000.0,
                        fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
                        risk_fraction=0.01, max_exposure_fraction=0.80,
                        max_positions=5, stop_atr_multiple=1.5, reward_risk=1.5,
-                       timeframe="15m"):
+                       timeframe="15m", spread_per_side_pct=0.125):
     """Run one agent's multi-symbol portfolio; concurrent positions are allowed."""
     if initial_cash <= 0 or not 0 < risk_fraction <= 0.05:
         raise ValueError("initial_cash must be positive and risk_fraction must be in (0, 0.05].")
@@ -91,7 +91,12 @@ def simulate_portfolio(frames, events, starts, ends, initial_cash=10000.0,
         raise ValueError("Invalid exposure or max_positions.")
     if stop_atr_multiple <= 0 or reward_risk <= 0:
         raise ValueError("Stop and reward/risk multiples must be positive.")
-    fee, slip = fee_per_side_pct / 100.0, slippage_per_side_pct / 100.0
+    if min(fee_per_side_pct, slippage_per_side_pct, spread_per_side_pct) < 0:
+        raise ValueError("Transaction-cost assumptions cannot be negative")
+    fee = fee_per_side_pct / 100.0
+    # OHLC history has no historical bid/ask. Add a conservative half-spread
+    # proxy per side to adverse slippage rather than pretending spread is zero.
+    slip = (slippage_per_side_pct + spread_per_side_pct) / 100.0
     cash, positions, marks = float(initial_cash), {}, {}
     trades, curve = [], []
     bars_at_time, events_at_time = defaultdict(dict), defaultdict(list)
@@ -220,8 +225,12 @@ def simulate_portfolio(frames, events, starts, ends, initial_cash=10000.0,
     return {"metrics": metrics, "trades": trades, "equity_curve": curve}
 
 
-def buy_and_hold_benchmark(frames, starts, ends, initial_cash, fee_per_side_pct, slippage_per_side_pct):
-    fee, slip = fee_per_side_pct / 100.0, slippage_per_side_pct / 100.0
+def buy_and_hold_benchmark(frames, starts, ends, initial_cash, fee_per_side_pct,
+                           slippage_per_side_pct, spread_per_side_pct=0.125):
+    if min(fee_per_side_pct, slippage_per_side_pct, spread_per_side_pct) < 0:
+        raise ValueError("Transaction-cost assumptions cannot be negative")
+    fee = fee_per_side_pct / 100.0
+    slip = (slippage_per_side_pct + spread_per_side_pct) / 100.0
     symbols = [s for s in frames if int(ends[s]) > int(starts[s])]
     if not symbols:
         return {"final_equity": initial_cash, "total_return_pct": 0.0, "by_symbol": {}}
@@ -291,13 +300,14 @@ def filter_events_by_market_mode(events, market_mode):
 
 
 def benchmark_for_market_mode(market_mode, frames, starts, ends, initial_cash,
-                              fee_per_side_pct, slippage_per_side_pct):
+                              fee_per_side_pct, slippage_per_side_pct,
+                              spread_per_side_pct=0.125):
     """Use a comparable benchmark for each market mode."""
     if market_mode == "spot_long":
         return (
             buy_and_hold_benchmark(
                 frames, starts, ends, initial_cash,
-                fee_per_side_pct, slippage_per_side_pct,
+                fee_per_side_pct, slippage_per_side_pct, spread_per_side_pct,
             ),
             "equal_weight_buy_and_hold",
         )
@@ -317,22 +327,29 @@ def failed_spot_long_test_rows(summaries):
         and row["market_mode"] == "spot_long"
         and row["agent"] in SPOT_LONG_GATE_AGENTS
     ]
-    min_bot_a_test_trades = 50
-    return [
-        row for row in rows
-        if int(row["trades"]) == 0
-        or float(row["total_return_pct"]) <= 0
-        or (
-            row["agent"] == "Bot A — Altas expressivas"
-            and int(row["trades"]) < min_bot_a_test_trades
+    minimum_test_trades = 50
+    max_acceptable_drawdown_pct = 20.0
+    def passes(row):
+        profit_factor = row.get("profit_factor")
+        profit_factor_ok = (
+            profit_factor == "infinity"
+            or (profit_factor is not None and math.isfinite(float(profit_factor))
+                and float(profit_factor) > 1.0)
         )
-    ]
+        return (
+            int(row.get("trades", 0)) >= minimum_test_trades
+            and float(row.get("total_return_pct", 0.0)) > 0.0
+            and float(row.get("excess_vs_benchmark_pct", 0.0)) > 0.0
+            and profit_factor_ok
+            and float(row.get("max_drawdown_pct", -100.0)) >= -max_acceptable_drawdown_pct
+        )
+    return [row for row in rows if not passes(row)]
 
 
 def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
         initial_cash=10000.0, risk_fraction=0.01, max_exposure_fraction=0.80,
         max_positions=5, stop_atr_multiple=1.5, reward_risk=1.5,
-        require_positive_test=True):
+        require_positive_test=True, spread_per_side_pct=0.125):
     cfg = load_config()
     root = Path(cfg["_root"])
     historical_dir, output_dir = root / "data" / "historical", root / "data" / "backtest"
@@ -378,10 +395,11 @@ def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
                         frames, selected, starts, ends, initial_cash, fee_per_side_pct,
                         slippage_per_side_pct, risk_fraction, max_exposure_fraction,
                         max_positions, stop_atr_multiple, reward_risk, timeframe,
+                        spread_per_side_pct=spread_per_side_pct,
                     )
                     bh, benchmark_name = benchmark_for_market_mode(
                         market_mode, frames, starts, ends, initial_cash,
-                        fee_per_side_pct, slippage_per_side_pct,
+                        fee_per_side_pct, slippage_per_side_pct, spread_per_side_pct,
                     )
                     buy_hold_return = bh["total_return_pct"] if market_mode == "spot_long" else None
                     row = dict(sim["metrics"])
@@ -447,7 +465,13 @@ def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
         "execution": {
             "entry": "next candle open after closed signal",
             "intrabar": "stop first if stop and target both hit",
-            "fees_and_slippage": "charged on entry and exit",
+            "fees_slippage_and_spread": {
+                "fee_per_side_pct": fee_per_side_pct,
+                "slippage_per_side_pct": slippage_per_side_pct,
+                "spread_proxy_per_side_pct": spread_per_side_pct,
+                "round_trip_assumption_pct": 2 * (fee_per_side_pct + slippage_per_side_pct + spread_per_side_pct),
+                "spread_note": "Historical bid/ask is unavailable in OHLC candles; spread is an explicit conservative proxy, not observed historical data."
+            },
             "positions": "simultaneous across symbols within each agent and market mode",
             "split_liquidation": "open positions closed at final candle of each split",
         },
@@ -492,6 +516,7 @@ if __name__ == "__main__":
     parser.add_argument("--days", type=int, default=1460)
     parser.add_argument("--fee-per-side-pct", type=float, default=0.10)
     parser.add_argument("--slippage-per-side-pct", type=float, default=0.05)
+    parser.add_argument("--spread-per-side-pct", type=float, default=0.125)
     parser.add_argument("--initial-cash", type=float, default=10000.0)
     parser.add_argument("--risk-fraction", type=float, default=0.01)
     parser.add_argument("--max-exposure-fraction", type=float, default=0.80)
@@ -500,9 +525,9 @@ if __name__ == "__main__":
     parser.add_argument("--reward-risk", type=float, default=1.5)
     parser.add_argument("--allow-non-positive-test", action="store_true")
     args = parser.parse_args()
-    if not 60 <= args.days <= 1460 or min(args.fee_per_side_pct, args.slippage_per_side_pct) < 0:
+    if not 60 <= args.days <= 1460 or min(args.fee_per_side_pct, args.slippage_per_side_pct, args.spread_per_side_pct) < 0:
         parser.error("Invalid days or transaction-cost assumptions.")
     raise SystemExit(run(args.days, args.fee_per_side_pct, args.slippage_per_side_pct,
                          args.initial_cash, args.risk_fraction, args.max_exposure_fraction,
                          args.max_positions, args.stop_atr_multiple, args.reward_risk,
-                         not args.allow_non_positive_test))
+                         not args.allow_non_positive_test, args.spread_per_side_pct))
