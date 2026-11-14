@@ -55,6 +55,56 @@ def download_historical_klines(base_url, symbol, interval, start_ms, end_ms, ses
 
     if not rows:
         raise ValueError(f"No historical candles returned: {symbol} {interval}")
+
+    # Recover internal gaps with targeted public-kline requests. Never fabricate
+    # OHLCV bars: if Binance cannot supply the exact missing open_time, reject
+    # the dataset rather than silently bridging it.
+    interval_ms = BASE_INTERVAL_MS[interval]
+    initial_times = sorted(int(row[0]) for row in rows)
+    if len(initial_times) != len(set(initial_times)):
+        raise ValueError(f"Historical sample contains duplicate candles: {symbol} {interval}")
+    missing_times = []
+    for left, right in zip(initial_times, initial_times[1:]):
+        delta = right - left
+        if delta % interval_ms:
+            raise ValueError(f"Historical candle timestamps are irregular: {symbol} {interval}")
+        missing_times.extend(left + interval_ms * step for step in range(1, delta // interval_ms))
+    if len(missing_times) > 100:
+        raise ValueError(
+            f"Historical sample has {len(missing_times)} missing candles; refusing bulk repair: {symbol} {interval}"
+        )
+    for missing_open_ms in missing_times:
+        recovered = False
+        for attempt in range(3):
+            try:
+                response = session.get(
+                    url,
+                    params={
+                        "symbol": symbol, "interval": interval,
+                        "startTime": missing_open_ms,
+                        "endTime": missing_open_ms + interval_ms - 1,
+                        "limit": 10,
+                    },
+                    timeout=20,
+                )
+                response.raise_for_status()
+                candidates = response.json()
+                exact = [row for row in candidates if int(row[0]) == missing_open_ms]
+                if len(exact) == 1:
+                    rows.extend(exact)
+                    recovered = True
+                    break
+            except requests.RequestException:
+                if attempt == 2:
+                    raise
+            if attempt < 2:
+                time.sleep(0.25 * (attempt + 1))
+        if not recovered:
+            raise ValueError(
+                f"Unable to recover missing candle {missing_open_ms}: {symbol} {interval}"
+            )
+
+    rows.sort(key=lambda row: int(row[0]))
     frame = pd.DataFrame(rows, columns=COLUMNS)
     for column in ["open", "high", "low", "close", "volume", "quote_volume"]:
         frame[column] = pd.to_numeric(frame[column], errors="coerce")
@@ -68,6 +118,13 @@ def download_historical_klines(base_url, symbol, interval, start_ms, end_ms, ses
     frame = frame[frame["close_time"] < pd.Timestamp.now(tz="UTC")].copy().reset_index(drop=True)
     if frame.empty:
         raise ValueError(f"Historical sample contains no fully closed candles: {symbol} {interval}")
+    expected_latest_open_ms = (int(end_ms) // interval_ms) * interval_ms - interval_ms
+    actual_latest_open_ms = int(frame.iloc[-1]["open_time"].timestamp() * 1000)
+    if actual_latest_open_ms < expected_latest_open_ms:
+        missing_tail = (expected_latest_open_ms - actual_latest_open_ms) // interval_ms
+        raise ValueError(
+            f"Historical sample ends {missing_tail} candles early: {symbol} {interval}"
+        )
     if frame[["open", "high", "low", "close", "volume", "quote_volume"]].isna().any().any():
         raise ValueError(f"Historical candles contain invalid numeric values: {symbol} {interval}")
     if (frame[["open", "high", "low", "close"]] <= 0).any().any() or (frame[["volume", "quote_volume"]] < 0).any().any():
