@@ -192,8 +192,12 @@ def event_study(symbol, timeframe, candles, cfg, fee_per_side_pct=0.10,
         if float(enriched.iloc[index]["quote_volume_24h_usdt"]) < minimum_quote_volume:
             continue
         split, split_end = _split_for_index(index, len(enriched))
+        # All current rules need at most 55 closed candles (SMA50 plus
+        # previous-candle and breakout context); bound the window to avoid
+        # quadratic work over multi-year datasets.
+        point_in_time_window = enriched.iloc[max(0, index - 54):index + 1]
         alerts = run_market_agents_enriched(
-            symbol, timeframe, enriched.iloc[:index + 1], cfg
+            symbol, timeframe, point_in_time_window, cfg
         )
         for alert in alerts:
             direction = signal_direction(alert)
