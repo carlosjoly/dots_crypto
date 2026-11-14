@@ -100,23 +100,31 @@ requirements.txt
 ```
 *******************************************************************************************************
 
-Eu seguiria com uma auditoria em duas frentes:
-1. Executar e verificar um ciclo completo na main, agora com o Bot G integrado, conferindo coleta, alertas, histórico e Telegram.
-2. Corrigir o Bot F e realizar testes específicos por rede, sem modificar a lógica dos Bots A–E.
-Depois disso, teremos uma fotografia operacional atualizada de A a G, e poderemos avançar para H, I e J com critérios claros.
+Plano de trabalho recomendado
+Eu organizaria o trabalho nesta ordem, sem alterar os critérios de segurança para aumentar a quantidade de alertas.
+Prioridade P0 — impedir decisões financeiras ruins
+1. Corrigir a coleta histórica e as lacunas dos candles.
+2. Revisar as regras dos Bots C, D e E, começando pelos piores resultados.
+3. Recalcular rentabilidade com custos e spread mais realistas.
+4. Manter todos os sinais em modo experimental até obter aprovação fora da amostra.
 
-1. O que considero prioritário
-Minha avaliação técnica estabelece esta ordem:
-Prioridade	Trabalho	Motivo
-1	Validar Bot G na execução normal da main	Confirmar operação após integração
-2	Corrigir e testar Bot F	Resolver HTTP 404 e HTTP 429
-3	Consolidar A–E	Backtest, custos, slippage e qualidade dos sinais
-4	Construir Bot H	Inteligência fundamentalista com fontes primárias
-5	Construir Bot J	Dados de oferta, distribuição e desbloqueios
-6	Definir Bot I	Estabelecer sua função antes de desenvolver
+Prioridade P0 — recuperar a capacidade de descoberta do Bot F
+1. Adicionar paginação controlada, começando pela BSC.
+2. Separar a fila de revisão da página de descoberta.
+3. Reavaliar os candidatos pendentes e identificar estados obsoletos.
+4. Produzir um relatório por rede, DEX e motivo de rejeição.
 
-Minha recomendação: não ativar H e J prematuramente e não criar um Bot I apenas para preencher a sequência. Primeiro precisamos tornar os bots já existentes confiáveis.
-5. Próxima etapa operacional
+Prioridade P1 — comprovar segurança e ampliar cobertura
+1. Demonstrar aprovação on-chain positiva com LP efetivamente bloqueada.
+2. Validar adaptadores de outras redes individualmente.
+3. Fortalecer a camada compartilhada de segurança.
+4. Completar a validação de qualidade dos dados do Bot G.
+
+Prioridade P2 — excelência operacional
+1. Proteger arquivos e segredos.
+2. Fixar dependências e versões das Actions.
+3. Melhorar persistência, monitoramento e histórico de artefatos.
+4. Estabelecer indicadores operacionais e financeiros por bot.
 
 ## Auditoria de mercado, Bot F e Bot G
 
