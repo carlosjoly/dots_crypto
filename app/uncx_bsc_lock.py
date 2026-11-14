@@ -350,7 +350,7 @@ def build_bsc_pancakeswap_v2_lp_proof(pool_address, rpc, allowed_factories=None,
     return snapshot
 
 
-def is_valid_bsc_pancakeswap_v2_lp_proof(proof, expected_pool, fresh_liquidity):
+def is_valid_bsc_pancakeswap_v2_lp_proof(proof, expected_pool, fresh_liquidity, expected_token):
     """Validate direct verifier output before Telegram; runner replaces discovery proof."""
     import math
     if not isinstance(proof, dict) or proof.get("status") != "verified":
@@ -361,7 +361,7 @@ def is_valid_bsc_pancakeswap_v2_lp_proof(proof, expected_pool, fresh_liquidity):
         active=int(proof.get("lock_records_active",0))
     except (TypeError,ValueError,OverflowError):
         return False
-    txs=proof.get("lock_transactions"); pool=str(expected_pool or "").lower()
+    txs=proof.get("lock_transactions"); pool=str(expected_pool or "").lower(); token=str(expected_token or "").lower()
     return (
         math.isfinite(liquidity) and math.isfinite(protected) and math.isfinite(fresh)
         and liquidity >= 25000 and fresh >= 25000 and liquidity == fresh
@@ -369,6 +369,7 @@ def is_valid_bsc_pancakeswap_v2_lp_proof(proof, expected_pool, fresh_liquidity):
         and proof.get("source") == "EVM_JSON_RPC"
         and proof.get("network") == "bsc" and str(proof.get("chain_id")) == "56"
         and pool == str(proof.get("pool_address") or "").lower() and bool(ADDRESS.fullmatch(pool))
+        and bool(ADDRESS.fullmatch(token)) and token in (str(proof.get("token0") or "").lower(), str(proof.get("token1") or "").lower())
         and str(proof.get("pool_factory") or "").lower() == PANCAKE_V2_FACTORY
         and str(proof.get("locker_factory") or "").lower() == PANCAKE_V2_FACTORY
         and str(proof.get("lock_contract") or "").lower() == UNCX_BSC_PANCAKE_V2_LOCKER
