@@ -69,7 +69,7 @@ def main():
                 alert.get("pool_address"), JsonRpc(rpc_url), liquidity_usd=fresh["liquidity_usd"]
             )
             alert["independent_lp_proof"] = proof
-            if not is_valid_bsc_pancakeswap_v2_lp_proof(proof, alert.get("pool_address"), fresh["liquidity_usd"]):
+            if not is_valid_bsc_pancakeswap_v2_lp_proof(proof, alert.get("pool_address"), fresh["liquidity_usd"], alert.get("token_address")):
                 blocked_lp += 1
                 defer_lp_proof_review(cfg, alert, proof.get("reason") or "prova UNCX/BSC não aprovada")
                 log.warning("Bot F Telegram bloqueado: prova UNCX/BSC não aprovada para %s; status=%s; motivo=%s",
