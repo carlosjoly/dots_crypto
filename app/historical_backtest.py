@@ -69,6 +69,15 @@ def download_historical_klines(base_url, symbol, interval, start_ms, end_ms, ses
         if delta % interval_ms:
             raise ValueError(f"Historical candle timestamps are irregular: {symbol} {interval}")
         missing_times.extend(left + interval_ms * step for step in range(1, delta // interval_ms))
+    expected_latest_open_ms = (int(end_ms) // interval_ms) * interval_ms - interval_ms
+    if initial_times[-1] < expected_latest_open_ms:
+        tail_delta = expected_latest_open_ms - initial_times[-1]
+        if tail_delta % interval_ms:
+            raise ValueError(f"Historical sample has an irregular final timestamp: {symbol} {interval}")
+        missing_times.extend(
+            initial_times[-1] + interval_ms * step
+            for step in range(1, tail_delta // interval_ms + 1)
+        )
     if len(missing_times) > 100:
         raise ValueError(
             f"Historical sample has {len(missing_times)} missing candles; refusing bulk repair: {symbol} {interval}"
