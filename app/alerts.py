@@ -206,6 +206,7 @@ def format_message(alert):
         if alert.get("validation_status") == "experimental"
         or alert.get("execution_eligible") is False else ""
     )
+    validation_status_block = f"{validation_status_line}\n\n" if validation_status_line else ""
     reference_lines = []
     if invalidation is not None:
         reference_lines.append(f"- Invalidação: US$ {_number(invalidation, 2)}.")
@@ -276,7 +277,7 @@ def format_message(alert):
         f"Referências técnicas:\n{chr(10).join(reference_lines)}"
         f"{extra_section}\n\n"
         f"CONFIANÇA: {confidence}.\n"
-        f"{validation_status_line}\n\n" if validation_status_line else ""
+        f"{validation_status_block}"
         f"RISCO: {risk}\n\n"
         f"Horário da coleta: {candle_time}.\n\n"
         "Alerta exclusivamente informativo. Não constitui recomendação de investimento, "
