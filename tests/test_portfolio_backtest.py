@@ -84,10 +84,10 @@ class MarketModeSeparationTests(unittest.TestCase):
         frames = {"BTCUSDT": frame}
         starts, ends = {"BTCUSDT": 0}, {"BTCUSDT": 2}
         long_benchmark, long_name = benchmark_for_market_mode(
-            "spot_long", frames, starts, ends, 10000, 0, 0
+            "spot_long", frames, starts, ends, 10000, 0, 0, spread_per_side_pct=0
         )
         short_benchmark, short_name = benchmark_for_market_mode(
-            "short_research", frames, starts, ends, 10000, 0, 0
+            "short_research", frames, starts, ends, 10000, 0, 0, spread_per_side_pct=0
         )
         self.assertEqual(long_name, "equal_weight_buy_and_hold")
         self.assertEqual(long_benchmark["total_return_pct"], 10.0)
@@ -132,7 +132,7 @@ class PortfolioSimulationTests(unittest.TestCase):
             {"BTCUSDT": frame},
             [{"symbol": "BTCUSDT", "entry_index": 0, "direction": 1, "atr": 2.0}],
             {"BTCUSDT": 0}, {"BTCUSDT": 1}, initial_cash=10000,
-            fee_per_side_pct=0, slippage_per_side_pct=0,
+            fee_per_side_pct=0, slippage_per_side_pct=0, spread_per_side_pct=0,
         )
         self.assertEqual(result["trades"][0]["exit_reason"], "stop")
         self.assertLess(result["trades"][0]["net_pnl"], 0)
@@ -165,6 +165,29 @@ class PortfolioSimulationTests(unittest.TestCase):
         self.assertEqual(result["trades"][0]["direction"], "short")
         self.assertEqual(result["trades"][0]["exit_reason"], "target")
         self.assertGreater(result["trades"][0]["net_pnl"], 0)
+
+    def test_spread_proxy_increases_adverse_execution_cost(self):
+        frame = self.frame([{
+            "open_time": "2026-01-01T00:00:00Z", "open": 100.0,
+            "high": 101.0, "low": 95.0, "close": 98.0,
+        }])
+        args = (
+            {"BTCUSDT": frame},
+            [{"symbol": "BTCUSDT", "entry_index": 0, "direction": 1, "atr": 2.0}],
+            {"BTCUSDT": 0}, {"BTCUSDT": 1},
+        )
+        no_spread = simulate_portfolio(
+            *args, initial_cash=10000, fee_per_side_pct=0,
+            slippage_per_side_pct=0, spread_per_side_pct=0,
+        )
+        with_spread = simulate_portfolio(
+            *args, initial_cash=10000, fee_per_side_pct=0,
+            slippage_per_side_pct=0, spread_per_side_pct=0.125,
+        )
+        self.assertLess(
+            with_spread["trades"][0]["net_pnl"],
+            no_spread["trades"][0]["net_pnl"],
+        )
 
     def test_splits_are_chronological_and_non_overlapping(self):
         bounds = chronological_bounds(100)
