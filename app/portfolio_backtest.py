@@ -39,6 +39,42 @@ def chronological_bounds(count):
             "test": (validation_end, count)}
 
 
+TIMEFRAME_INTERVALS = {
+    "15m": pd.Timedelta(minutes=15),
+    "1h": pd.Timedelta(hours=1),
+    "4h": pd.Timedelta(hours=4),
+}
+
+
+def validate_candle_frame(frame, symbol, timeframe):
+    """Fail closed on incomplete, malformed or non-contiguous OHLCV history."""
+    if timeframe not in TIMEFRAME_INTERVALS:
+        raise ValueError(f"Unsupported timeframe: {timeframe}")
+    required = ["open_time", "close_time", "open", "high", "low", "close", "volume", "quote_volume"]
+    missing = [column for column in required if column not in frame.columns]
+    if missing:
+        raise ValueError(f"Missing historical columns for {symbol} {timeframe}: {missing}")
+    if frame.empty or frame["open_time"].isna().any() or frame["close_time"].isna().any():
+        raise ValueError(f"Empty or invalid historical timestamps: {symbol} {timeframe}")
+    if frame["open_time"].duplicated().any() or not frame["open_time"].is_monotonic_increasing:
+        raise ValueError(f"Invalid candle ordering: {symbol} {timeframe}")
+    numeric = frame[["open", "high", "low", "close", "volume", "quote_volume"]].to_numpy(dtype=float)
+    if not np.isfinite(numeric).all():
+        raise ValueError(f"Non-finite OHLCV values: {symbol} {timeframe}")
+    prices = frame[["open", "high", "low", "close"]]
+    if (prices <= 0).any().any() or (frame[["volume", "quote_volume"]] < 0).any().any():
+        raise ValueError(f"Out-of-range OHLCV values: {symbol} {timeframe}")
+    if (frame["high"] < prices[["open", "close", "low"]].max(axis=1)).any():
+        raise ValueError(f"Invalid candle high: {symbol} {timeframe}")
+    if (frame["low"] > prices[["open", "close", "high"]].min(axis=1)).any():
+        raise ValueError(f"Invalid candle low: {symbol} {timeframe}")
+    if not frame["open_time"].diff().dropna().eq(TIMEFRAME_INTERVALS[timeframe]).all():
+        raise ValueError(f"Historical sample contains missing or irregular candles: {symbol} {timeframe}")
+    if (frame["close_time"] <= frame["open_time"]).any():
+        raise ValueError(f"Invalid candle close_time: {symbol} {timeframe}")
+    return frame
+
+
 def _exit_trade(symbol, position, bar, reason, fee_rate, slip_rate):
     direction = position["direction"]
     reference = float(bar["close"])
@@ -364,14 +400,21 @@ def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
             if not path.exists():
                 manifest.append({"symbol": symbol, "timeframe": timeframe, "status": "missing"})
                 continue
-            frame = pd.read_csv(path)
-            frame["open_time"] = pd.to_datetime(frame["open_time"], utc=True)
-            frame["close_time"] = pd.to_datetime(frame["close_time"], utc=True)
-            for col in ("open", "high", "low", "close", "volume", "quote_volume"):
-                frame[col] = pd.to_numeric(frame[col], errors="raise")
-            if frame["open_time"].duplicated().any() or not frame["open_time"].is_monotonic_increasing:
-                raise ValueError(f"Invalid candle ordering: {symbol} {timeframe}")
-            data, events = _make_events(symbol, timeframe, frame, cfg)
+            try:
+                frame = pd.read_csv(path)
+                frame["open_time"] = pd.to_datetime(frame["open_time"], utc=True)
+                frame["close_time"] = pd.to_datetime(frame["close_time"], utc=True)
+                for col in ("open", "high", "low", "close", "volume", "quote_volume"):
+                    frame[col] = pd.to_numeric(frame[col], errors="raise")
+                validate_candle_frame(frame, symbol, timeframe)
+                data, events = _make_events(symbol, timeframe, frame, cfg)
+            except Exception as exc:
+                manifest.append({
+                    "symbol": symbol, "timeframe": timeframe, "status": "invalid",
+                    "reason": f"{type(exc).__name__}: {str(exc)[:200]}",
+                })
+                log.exception("Dataset histórico rejeitado na carteira: %s %s", symbol, timeframe)
+                continue
             frames[symbol] = data.reset_index(drop=True)
             for agent, rows in events.items():
                 events_by_agent[agent].extend(rows)
@@ -454,7 +497,12 @@ def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
         and row["agent"] in SPOT_LONG_GATE_AGENTS
     ]
     failed = failed_spot_long_test_rows(summaries)
-    gate_passed = bool(test_rows) and not failed
+    expected_datasets = len(cfg["exchange"]["symbols"]) * len(cfg["exchange"]["timeframes"])
+    datasets_complete = (
+        len(manifest) == expected_datasets
+        and all(item.get("status") == "valid" for item in manifest)
+    )
+    gate_passed = bool(test_rows) and datasets_complete and not failed
     report = {
         "method": "separate_spot_long_and_synthetic_short_portfolios",
         "days_requested": days,
@@ -489,7 +537,15 @@ def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
         "test_gate": {
             "required": require_positive_test,
             "scope": "spot_long only; Bots A, C, D and E. Bot B remains a downside/risk alert, not a Spot-long candidate.",
-            "bot_a_minimum_test_trades": 50,
+            "minimum_test_trades_per_agent_timeframe": 50,
+            "required_conditions": [
+                "at least 50 out-of-sample trades", "positive net return",
+                "outperform equal-weight Buy & Hold", "profit factor > 1",
+                "maximum drawdown no worse than -20%", "all configured datasets valid and contiguous",
+            ],
+            "datasets_complete": datasets_complete,
+            "expected_datasets": expected_datasets,
+            "valid_datasets": sum(item.get("status") == "valid" for item in manifest),
             "passed": gate_passed,
             "evaluated_combinations": len(test_rows),
             "failed": [
@@ -508,7 +564,7 @@ def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
         "Portfolio backtest: %d combinações; %d Spot-long no teste; %d reprovadas no gate.",
         len(summaries), len(test_rows), len(failed),
     )
-    return 1 if require_positive_test and (not test_rows or failed) else 0
+    return 1 if require_positive_test and (not test_rows or not datasets_complete or failed) else 0
 
 
 if __name__ == "__main__":
