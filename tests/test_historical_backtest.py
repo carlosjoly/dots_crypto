@@ -1,8 +1,11 @@
 import unittest
 from datetime import datetime, timezone
 
+import pandas as pd
+
 from app.historical_backtest import (net_event_return, signal_direction, _split_for_index,
-                                      summarize_events, download_historical_klines, BASE_INTERVAL_MS)
+                                      summarize_events, download_historical_klines, BASE_INTERVAL_MS,
+                                      is_documented_spot_outage_gap, rolling_24h_quote_volume)
 
 
 class HistoricalEventStudyTests(unittest.TestCase):
@@ -87,6 +90,44 @@ class HistoricalEventStudyTests(unittest.TestCase):
         )
         self.assertEqual(len(frame), 3)
         self.assertEqual(session.calls, [0, interval])
+
+    def test_documented_outage_gap_is_recognized_only_for_aligned_candle_starts(self):
+        self.assertTrue(is_documented_spot_outage_gap("2023-03-24T12:45:00Z", "15m"))
+        self.assertTrue(is_documented_spot_outage_gap("2023-03-24T13:00:00Z", "1h"))
+        self.assertFalse(is_documented_spot_outage_gap("2023-03-24T11:15:00Z", "15m"))
+        self.assertFalse(is_documented_spot_outage_gap("2023-03-24T14:00:00Z", "15m"))
+        self.assertFalse(is_documented_spot_outage_gap("2023-03-25T12:45:00Z", "15m"))
+        self.assertFalse(is_documented_spot_outage_gap("2023-03-24T12:00:00Z", "4h"))
+
+    def test_24h_quote_volume_uses_elapsed_window_not_last_n_rows(self):
+        frame = pd.DataFrame({
+            "open_time": pd.date_range("2026-01-01T00:00:00Z", periods=97, freq="15min"),
+            "quote_volume": [10000.0] + [1.0] * 96,
+        })
+        rolling = rolling_24h_quote_volume(frame, "15m")
+        self.assertEqual(rolling.iloc[-1], 96.0)
+
+    def test_documented_outage_missing_candle_is_not_retried_or_fabricated(self):
+        interval = BASE_INTERVAL_MS["15m"]
+        start = int(pd.Timestamp("2023-03-24T12:30:00Z").timestamp() * 1000)
+        end = start + 3 * interval
+        def candle(ts):
+            return [ts, "100", "101", "99", "100", "10", ts + interval - 1,
+                    "1000", 5, "5", "500", "0"]
+        class Response:
+            def raise_for_status(self): pass
+            def json(self): return [candle(start), candle(start + 2 * interval)]
+        class Session:
+            def __init__(self): self.calls = 0
+            def get(self, url, params, timeout):
+                self.calls += 1
+                return Response()
+        session = Session()
+        frame = download_historical_klines(
+            "https://example.invalid", "BTCUSDT", "15m", start, end, session
+        )
+        self.assertEqual(len(frame), 2)
+        self.assertEqual(session.calls, 1)
 
     def test_invalid_prices_are_rejected(self):
         with self.assertRaises(ValueError):
