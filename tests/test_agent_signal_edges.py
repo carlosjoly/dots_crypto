@@ -32,13 +32,13 @@ def config():
 class EdgeTriggeredSignalTests(unittest.TestCase):
     def test_breakout_is_emitted_only_on_crossing_candle(self):
         frame = make_frame()
-        frame.loc[58, ["close", "rel_volume"]] = [100.0, 1.2]
-        frame.loc[59, ["close", "rel_volume"]] = [103.0, 1.2]
+        frame.loc[58, ["close", "rel_volume"]] = [100.0, 2.0]
+        frame.loc[59, ["open", "close", "rel_volume", "sma20", "sma50"]] = [100.0, 103.0, 2.0, 100.5, 100.0]
         first = run_market_agents_enriched("BTCUSDT", "15m", frame.iloc[:60], config())
         self.assertEqual(sum(x["agent"] == "Bot D — Rompimentos" for x in first), 1)
 
-        frame.loc[59, ["close", "rel_volume"]] = [104.0, 1.2]
-        frame.loc[58, ["close", "rel_volume"]] = [103.0, 1.2]
+        frame.loc[59, ["open", "close", "rel_volume", "sma20", "sma50"]] = [103.0, 104.0, 2.0, 100.5, 100.0]
+        frame.loc[58, ["close", "rel_volume"]] = [103.0, 2.0]
         second = run_market_agents_enriched("BTCUSDT", "15m", frame, config())
         self.assertFalse(any(x["agent"] == "Bot D — Rompimentos" for x in second))
 
