@@ -5,7 +5,8 @@ import pandas as pd
 from app.historical_backtest import signal_direction
 from app.indicators import rsi
 from app.portfolio_backtest import (chronological_bounds, simulate_portfolio,
-                                    filter_events_by_market_mode, failed_spot_long_test_rows, benchmark_for_market_mode)
+                                    filter_events_by_market_mode, failed_spot_long_test_rows,
+                                    benchmark_for_market_mode, validate_candle_frame)
 
 
 class SafeSignalDirectionTests(unittest.TestCase):
@@ -113,6 +114,35 @@ class RsiEdgeCaseTests(unittest.TestCase):
     def test_invalid_period_is_rejected(self):
         with self.assertRaises(ValueError):
             rsi(pd.Series([1.0, 2.0]), period=0)
+
+
+class HistoricalCandleValidationTests(unittest.TestCase):
+    def test_contiguous_ohlcv_history_is_accepted(self):
+        frame = pd.DataFrame([
+            {"open_time": "2026-01-01T00:00:00Z", "open": 100.0, "high": 102.0,
+             "low": 99.0, "close": 101.0, "volume": 10.0, "quote_volume": 1000.0,
+             "close_time": "2026-01-01T00:14:59Z"},
+            {"open_time": "2026-01-01T00:15:00Z", "open": 101.0, "high": 103.0,
+             "low": 100.0, "close": 102.0, "volume": 11.0, "quote_volume": 1100.0,
+             "close_time": "2026-01-01T00:29:59Z"},
+        ])
+        frame["open_time"] = pd.to_datetime(frame["open_time"], utc=True)
+        frame["close_time"] = pd.to_datetime(frame["close_time"], utc=True)
+        self.assertIs(validate_candle_frame(frame, "BTCUSDT", "15m"), frame)
+
+    def test_gap_in_historical_candles_is_rejected(self):
+        frame = pd.DataFrame([
+            {"open_time": "2026-01-01T00:00:00Z", "open": 100.0, "high": 102.0,
+             "low": 99.0, "close": 101.0, "volume": 10.0, "quote_volume": 1000.0,
+             "close_time": "2026-01-01T00:14:59Z"},
+            {"open_time": "2026-01-01T00:30:00Z", "open": 101.0, "high": 103.0,
+             "low": 100.0, "close": 102.0, "volume": 11.0, "quote_volume": 1100.0,
+             "close_time": "2026-01-01T00:44:59Z"},
+        ])
+        frame["open_time"] = pd.to_datetime(frame["open_time"], utc=True)
+        frame["close_time"] = pd.to_datetime(frame["close_time"], utc=True)
+        with self.assertRaisesRegex(ValueError, "missing or irregular"):
+            validate_candle_frame(frame, "BTCUSDT", "15m")
 
 
 class PortfolioSimulationTests(unittest.TestCase):
