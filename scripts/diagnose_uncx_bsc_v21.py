@@ -293,8 +293,10 @@ def diagnose_pool(rpc, pool, block, lookback_blocks, chunk_size):
             except DiagnosticError:
                 legacy_abi_available = False
                 break
-            if lock["owner"] == "0x" + "0" * 40 or int(lock["initial_amount_raw"]) < int(lock["amount_raw"]):
-                raise DiagnosticError("legacy lock record contains invalid owner/amount")
+            if int(lock["initial_amount_raw"]) < int(lock["amount_raw"]):
+                raise DiagnosticError("legacy lock amount exceeds its initial amount")
+            if int(lock["amount_raw"]) > 0 and lock["owner"] == "0x" + "0" * 40:
+                raise DiagnosticError("active legacy lock has a zero owner")
             lock["lp_token"] = pool
             lock["index"] = index
             legacy_records.append(lock)
