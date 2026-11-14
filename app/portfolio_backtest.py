@@ -17,7 +17,8 @@ import pandas as pd
 
 from .agents import run_market_agents_enriched
 from .config import load_config
-from .historical_backtest import BARS_PER_24H, signal_direction
+from .historical_backtest import (BARS_PER_24H, signal_direction,
+                                  is_documented_spot_outage_gap, rolling_24h_quote_volume)
 from .indicators import enrich
 
 log = logging.getLogger("dot_cripto.portfolio_backtest")
@@ -68,8 +69,21 @@ def validate_candle_frame(frame, symbol, timeframe):
         raise ValueError(f"Invalid candle high: {symbol} {timeframe}")
     if (frame["low"] > prices[["open", "close", "high"]].min(axis=1)).any():
         raise ValueError(f"Invalid candle low: {symbol} {timeframe}")
-    if not frame["open_time"].diff().dropna().eq(TIMEFRAME_INTERVALS[timeframe]).all():
-        raise ValueError(f"Historical sample contains missing or irregular candles: {symbol} {timeframe}")
+    gaps = frame["open_time"].diff().dropna()
+    if not gaps.eq(TIMEFRAME_INTERVALS[timeframe]).all():
+        interval = TIMEFRAME_INTERVALS[timeframe]
+        times = frame["open_time"].tolist()
+        unexplained = []
+        for left, right in zip(times, times[1:]):
+            missing_count = int((right - left) / interval) - 1
+            for step in range(1, missing_count + 1):
+                missing_time = left + step * interval
+                if not is_documented_spot_outage_gap(missing_time, timeframe):
+                    unexplained.append(missing_time)
+        if unexplained:
+            raise ValueError(
+                f"Historical sample contains {len(unexplained)} missing or irregular candles: {symbol} {timeframe}"
+            )
     if (frame["close_time"] <= frame["open_time"]).any():
         raise ValueError(f"Invalid candle close_time: {symbol} {timeframe}")
     return frame
@@ -295,7 +309,7 @@ def _make_events(symbol, timeframe, raw, cfg):
         raise ValueError("alerts.cooldown_minutes cannot be negative")
     last_signal_at = {}
     bars_24h = BARS_PER_24H[timeframe]
-    data["quote_volume_24h"] = data["quote_volume"].rolling(bars_24h).sum()
+    data["quote_volume_24h"] = rolling_24h_quote_volume(data, timeframe)
     minimum = float(cfg["exchange"]["min_quote_volume_24h_usdt"])
     events = defaultdict(list)
     for i in range(max(54, bars_24h - 1), len(data) - 1):
