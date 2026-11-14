@@ -75,7 +75,10 @@ def validate_candle_frame(frame, symbol, timeframe):
         times = frame["open_time"].tolist()
         unexplained = []
         for left, right in zip(times, times[1:]):
-            missing_count = int((right - left) / interval) - 1
+            delta = right - left
+            if delta % interval != pd.Timedelta(0):
+                raise ValueError(f"Historical sample contains irregular candle spacing: {symbol} {timeframe}")
+            missing_count = int(delta / interval) - 1
             for step in range(1, missing_count + 1):
                 missing_time = left + step * interval
                 if not is_documented_spot_outage_gap(missing_time, timeframe):
