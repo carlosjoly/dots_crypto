@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import time
+from urllib.parse import urlsplit
 import requests
 
 log = logging.getLogger("dot_cripto.bot_f.onchain")
@@ -37,11 +38,18 @@ class JsonRpc:
 
     def call(self, method, params):
         self.request_id += 1
-        response = requests.post(self.url, json={
-            "jsonrpc": "2.0", "id": self.request_id, "method": method, "params": params,
-        }, headers={"Content-Type": "application/json"}, timeout=self.timeout)
-        response.raise_for_status()
-        payload = response.json()
+        try:
+            response = requests.post(self.url, json={
+                "jsonrpc": "2.0", "id": self.request_id, "method": method, "params": params,
+            }, headers={"Content-Type": "application/json"}, timeout=self.timeout)
+            response.raise_for_status()
+            payload = response.json()
+        except requests.RequestException as exc:
+            raise VerificationError(
+                f"RPC transport failure ({type(exc).__name__}); endpoint redacted"
+            ) from None
+        except ValueError:
+            raise VerificationError("RPC returned invalid JSON") from None
         if not isinstance(payload, dict) or payload.get("error") or "result" not in payload:
             raise VerificationError(f"RPC {method}: resposta inválida ou erro")
         return payload["result"]
@@ -141,7 +149,7 @@ def verify_v2_pool_reserves(network, pool_address, allowed_factories=(),
             "reserve_timestamp": reserve_ts, "lp_total_supply_raw": str(supply),
             "reserve_block_number": number, "reserve_block_hash": block["hash"].lower(),
             "reserve_block_timestamp": int(block.get("timestamp", "0x0"), 16),
-            "rpc_endpoint_host": endpoint.split("/")[2] if endpoint and "://" in endpoint else "injected-test-rpc",
+            "rpc_endpoint_host": urlsplit(endpoint).hostname if endpoint and "://" in endpoint else "injected-test-rpc",
         })
     except Exception as exc:
         result["reason"] = str(exc)[:500]
