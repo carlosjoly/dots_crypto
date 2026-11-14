@@ -40,6 +40,10 @@ REFERENCE_PATTERNS = {
 
 
 def emit_alert(cfg, alert):
+    # Until a strategy has passed the independent out-of-sample approval gate,
+    # every outbound alert (including discovery/social alerts) remains research-only.
+    alert.setdefault("validation_status", "experimental")
+    alert.setdefault("execution_eligible", False)
     root = Path(cfg["_root"])
     path = root / cfg["alerts"]["log_file"]
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -203,8 +207,8 @@ def format_message(alert):
     reason_lines = "\n".join(f"- {item}" for item in reasons)
     validation_status_line = (
         "STATUS: EXPERIMENTAL — NÃO APROVADO PARA EXECUÇÃO."
-        if alert.get("validation_status") == "experimental"
-        or alert.get("execution_eligible") is False else ""
+        if alert.get("validation_status") != "approved"
+        or alert.get("execution_eligible") is not True else ""
     )
     validation_status_block = f"{validation_status_line}\n\n" if validation_status_line else ""
     reference_lines = []
