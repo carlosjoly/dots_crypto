@@ -63,6 +63,31 @@ class HistoricalEventStudyTests(unittest.TestCase):
         self.assertEqual(len(frame), 3)
         self.assertEqual(session.calls, [0, 2 * interval])
 
+    def test_missing_historical_candle_is_recovered_from_targeted_endpoint(self):
+        interval = BASE_INTERVAL_MS["15m"]
+        def candle(ts):
+            return [ts, "100", "101", "99", "100", "10", ts + interval - 1,
+                    "1000", 5, "5", "500", "0"]
+        class Response:
+            def __init__(self, rows): self.rows = rows
+            def raise_for_status(self): pass
+            def json(self): return self.rows
+        class Session:
+            def __init__(self): self.calls = []
+            def get(self, url, params, timeout):
+                self.calls.append(params["startTime"])
+                if params["startTime"] == 0:
+                    return Response([candle(0), candle(2 * interval)])
+                if params["startTime"] == interval:
+                    return Response([candle(interval)])
+                raise AssertionError("Unexpected historical request")
+        session = Session()
+        frame = download_historical_klines(
+            "https://example.invalid", "BTCUSDT", "15m", 0, 3 * interval, session
+        )
+        self.assertEqual(len(frame), 3)
+        self.assertEqual(session.calls, [0, interval])
+
     def test_invalid_prices_are_rejected(self):
         with self.assertRaises(ValueError):
             net_event_return(0, 100, 1)
