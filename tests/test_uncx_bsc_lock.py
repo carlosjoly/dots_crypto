@@ -14,7 +14,7 @@ POOL = "0x" + "a" * 40
 TOKEN0 = "0x" + "c" * 40
 TOKEN1 = "0x" + "d" * 40
 OWNER = "0x" + "e" * 40
-CODE_HASH = "0x" + "9" * 64
+CODE_HASH = "0x23157a45d396213e125dfaaf13e0fe3332c31e8e54e4084fb768f3920ed7addf"
 LOCKER_CODE = "0x60016000"
 SELECTORS = {
     "uniswapFactory()": "11111111",
@@ -37,7 +37,7 @@ class FakeRpc:
     def __init__(self, chain="0x38", pair_factory=PANCAKE_V2_FACTORY,
                  locker_factory=PANCAKE_V2_FACTORY, amount=1000000,
                  unlock=1900000000, locker_code=LOCKER_CODE,
-                 receipt_status="0x1", omit_deposit=False):
+                 receipt_status="0x1", omit_deposit=False, event_user=OWNER):
         self.chain = chain
         self.pair_factory = pair_factory
         self.locker_factory = locker_factory
@@ -46,6 +46,7 @@ class FakeRpc:
         self.locker_code = locker_code
         self.receipt_status = receipt_status
         self.omit_deposit = omit_deposit
+        self.event_user = event_user
         self.calls = []
 
     def call(self, method, params):
@@ -68,7 +69,7 @@ class FakeRpc:
             if self.omit_deposit:
                 return []
             event_topic = "0xabcdef01" + "0" * 56
-            event_data = "0x" + address_word(POOL)[2:] + address_word(OWNER)[2:] + word(1000000) + word(1700000000) + word(1900000000)
+            event_data = "0x" + address_word(POOL)[2:] + address_word(self.event_user)[2:] + word(1000000) + word(1700000000) + word(1900000000)
             from_block = int(params[0]["fromBlock"], 16)
             to_block = int(params[0]["toBlock"], 16)
             if from_block <= 0x120 <= to_block and params[0]["topics"] == [event_topic]:
