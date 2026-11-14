@@ -24,6 +24,46 @@ COLUMNS = ["open_time", "open", "high", "low", "close", "volume", "close_time",
            "quote_volume", "trades", "taker_buy_base", "taker_buy_quote", "ignore"]
 HORIZONS = (1, 4, 16, 48)
 
+# Binance officially halted all Spot trading from 11:27 UTC and resumed at
+# 14:00 UTC on 2023-03-24. Candles with no trades during this interval do not
+# exist in the public kline API. Never synthesize OHLCV for this documented halt.
+BINANCE_SPOT_OUTAGES = ((
+    pd.Timestamp("2023-03-24T11:27:00Z"),
+    pd.Timestamp("2023-03-24T14:00:00Z"),
+    "Binance Spot matching-engine maintenance (2023-03-24)",
+),)
+
+
+def is_documented_spot_outage_gap(open_time, timeframe):
+    """True only for an expected candle start wholly inside a documented halt."""
+    if timeframe not in BASE_INTERVAL_MS:
+        return False
+    ts = pd.Timestamp(open_time)
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    else:
+        ts = ts.tz_convert("UTC")
+    interval = pd.Timedelta(milliseconds=BASE_INTERVAL_MS[timeframe])
+    return any(
+        ts >= start.ceil(interval) and ts < end
+        for start, end, _reason in BINANCE_SPOT_OUTAGES
+    )
+
+
+def rolling_24h_quote_volume(frame, timeframe):
+    """Sum only candles inside the elapsed 24h window; require a full bar count."""
+    if timeframe not in BARS_PER_24H:
+        raise ValueError(f"Unsupported timeframe: {timeframe}")
+    timestamps = pd.to_datetime(frame["open_time"], utc=True)
+    values = pd.Series(
+        pd.to_numeric(frame["quote_volume"], errors="coerce").to_numpy(),
+        index=pd.DatetimeIndex(timestamps),
+    )
+    rolled = values.rolling(
+        "24h", closed="right", min_periods=BARS_PER_24H[timeframe]
+    ).sum()
+    return pd.Series(rolled.to_numpy(), index=frame.index)
+
 
 def download_historical_klines(base_url, symbol, interval, start_ms, end_ms, session=requests):
     if interval not in BASE_INTERVAL_MS:
@@ -109,6 +149,16 @@ def download_historical_klines(base_url, symbol, interval, start_ms, end_ms, ses
             if attempt < 2:
                 time.sleep(0.25 * (attempt + 1))
         if not recovered:
+            missing_open_time = pd.to_datetime(missing_open_ms, unit="ms", utc=True)
+            # Only internal gaps covered by Binance's published outage are
+            # exempt. A missing tail candle is never excused as a past outage.
+            if (missing_open_ms < initial_times[-1]
+                    and is_documented_spot_outage_gap(missing_open_time, interval)):
+                log.warning(
+                    "Skipping absent candle documented by Binance Spot outage: %s %s %s",
+                    symbol, interval, missing_open_time,
+                )
+                continue
             raise ValueError(
                 f"Unable to recover missing candle {missing_open_ms}: {symbol} {interval}"
             )
@@ -141,8 +191,21 @@ def download_historical_klines(base_url, symbol, interval, start_ms, end_ms, ses
     expected = pd.Timedelta(milliseconds=BASE_INTERVAL_MS[interval])
     gaps = frame["open_time"].diff().dropna()
     if not gaps.eq(expected).all():
-        missing = int((gaps / expected).round().sub(1).clip(lower=0).sum())
-        raise ValueError(f"Historical sample has {missing} missing candles: {symbol} {interval}")
+        missing_times = []
+        interval_ms = BASE_INTERVAL_MS[interval]
+        open_ms = (frame["open_time"].astype("int64") // 1_000_000).tolist()
+        for left, right in zip(open_ms, open_ms[1:]):
+            missing_times.extend(range(left + interval_ms, right, interval_ms))
+        unexplained = [
+            ts for ts in missing_times
+            if not is_documented_spot_outage_gap(
+                pd.to_datetime(ts, unit="ms", utc=True), interval
+            )
+        ]
+        if unexplained:
+            raise ValueError(
+                f"Historical sample has {len(unexplained)} unexplained missing candles: {symbol} {interval}"
+            )
     return frame
 
 
@@ -193,7 +256,7 @@ def event_study(symbol, timeframe, candles, cfg, fee_per_side_pct=0.10,
     if "quote_volume" not in enriched.columns:
         raise ValueError("Historical candles lack quote_volume; live liquidity filter cannot be approximated.")
     bars_24h = BARS_PER_24H[timeframe]
-    enriched["quote_volume_24h_usdt"] = enriched["quote_volume"].rolling(bars_24h).sum()
+    enriched["quote_volume_24h_usdt"] = rolling_24h_quote_volume(enriched, timeframe)
     minimum_quote_volume = float(cfg["exchange"]["min_quote_volume_24h_usdt"])
     records = []
     first_signal_index = max(54, bars_24h - 1)
