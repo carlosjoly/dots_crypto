@@ -77,6 +77,26 @@ class MarketModeSeparationTests(unittest.TestCase):
         self.assertEqual(failed_spot_long_test_rows(rows), [])
 
 
+    def test_profitability_gate_requires_return_benchmark_profit_factor_and_drawdown(self):
+        base = {
+            "split": "test", "market_mode": "spot_long",
+            "agent": "Bot C — Reversões", "timeframe": "1h",
+            "trades": 60, "total_return_pct": 3.0,
+            "excess_vs_benchmark_pct": 1.0, "profit_factor": 1.2,
+            "max_drawdown_pct": -10.0,
+        }
+        self.assertEqual(failed_spot_long_test_rows([base]), [])
+        for field, value in (
+            ("total_return_pct", 0.0),
+            ("excess_vs_benchmark_pct", -0.1),
+            ("profit_factor", 0.9),
+            ("max_drawdown_pct", -21.0),
+            ("trades", 49),
+        ):
+            candidate = dict(base, **{field: value})
+            with self.subTest(field=field):
+                self.assertEqual(len(failed_spot_long_test_rows([candidate])), 1)
+
     def test_spot_long_uses_buy_hold_and_short_research_uses_cash(self):
         frame = pd.DataFrame([
             {"open_time": "2026-01-01T00:00:00Z", "open": 100.0, "close": 100.0},
