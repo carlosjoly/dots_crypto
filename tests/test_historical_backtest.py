@@ -1,6 +1,8 @@
 import unittest
 from datetime import datetime, timezone
 
+import pandas as pd
+
 from app.historical_backtest import (net_event_return, signal_direction, _split_for_index,
                                       summarize_events, download_historical_klines, BASE_INTERVAL_MS,
                                       is_documented_spot_outage_gap, rolling_24h_quote_volume)
