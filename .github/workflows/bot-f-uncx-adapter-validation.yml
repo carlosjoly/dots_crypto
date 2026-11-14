@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - fix/bot-f-bsc-runtime-proof-integration
+      - fix/bot-f-runner-gate-live-audit
   workflow_dispatch:
 
 permissions:
@@ -30,11 +31,13 @@ jobs:
         env:
           BOT_F_RPC_URL_BSC: ${{ secrets.BOT_F_RPC_URL_BSC }}
         run: python scripts/validate_bot_f_uncx_adapter.py
-      - name: Upload adapter validation result
+      - name: Upload adapter validation and audit result
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: bot-f-uncx-adapter-validation-${{ github.run_id }}
-          path: data/bot_f_uncx_adapter_validation.json
+          path: |
+            data/bot_f_uncx_adapter_validation.json
+            data/bot_f_onchain_audit.jsonl
           if-no-files-found: warn
           retention-days: 7
