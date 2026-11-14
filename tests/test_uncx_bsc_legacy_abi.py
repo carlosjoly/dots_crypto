@@ -2,12 +2,14 @@ import unittest
 
 from scripts.diagnose_uncx_bsc_v21 import (
     LOCKER,
-    ON_DEPOSIT_LEGACY,
+    ON_DEPOSIT_LEGACY_SIGNATURE,
+    DiagnosticError,
+    _chunked_logs,
+    _event_topic,
+    _function_selector,
     decode_legacy_deposit,
     decode_legacy_lock,
     legacy_event_matches,
-    DiagnosticError,
-    _function_selector,
 )
 
 
@@ -47,12 +49,8 @@ class UncxBscLegacyAbiTests(unittest.TestCase):
     def test_decodes_six_field_token_locks_return(self):
         owner = "0x" + "b" * 40
         raw = "0x" + "".join([
-            word(1700000000),
-            word(900),
-            word(1000),
-            word(1900000000),
-            word(42),
-            address_word(owner),
+            word(1700000000), word(900), word(1000),
+            word(1900000000), word(42), address_word(owner),
         ])
         lock = decode_legacy_lock(raw)
         self.assertEqual(lock["lock_date"], 1700000000)
@@ -67,12 +65,51 @@ class UncxBscLegacyAbiTests(unittest.TestCase):
         with self.assertRaises(DiagnosticError):
             decode_legacy_lock(raw)
 
+    def test_derives_full_legacy_event_topic(self):
+        class FakeRpc:
+            def call(self, method, params):
+                self.assertion = (method, params)
+                return "0x" + "cd" * 32
+
+        rpc = FakeRpc()
+        topic = _event_topic(rpc, ON_DEPOSIT_LEGACY_SIGNATURE)
+        self.assertEqual(topic, "0x" + "cd" * 32)
+        self.assertEqual(rpc.assertion[0], "web3_sha3")
+
+    def test_chunked_logs_reduces_range_after_rpc_limit_error(self):
+        class FakeRpc:
+            def __init__(self):
+                self.attempted = []
+                self.successful = []
+
+            def call(self, method, params):
+                query = params[0]
+                start = int(query["fromBlock"], 16)
+                end = int(query["toBlock"], 16)
+                size = end - start + 1
+                self.attempted.append((start, end))
+                if size > 500:
+                    raise DiagnosticError("eth_getLogs: Block range is too large")
+                self.successful.append((start, end))
+                return []
+
+        rpc = FakeRpc()
+        self.assertEqual(_chunked_logs(rpc, {}, 1000, 1999, 2000), [])
+        self.assertGreater(len(rpc.attempted), len(rpc.successful))
+        self.assertEqual(rpc.attempted[0], (1000, 1999))
+        self.assertTrue(all(end - start + 1 <= 500 for start, end in rpc.successful))
+        self.assertEqual(rpc.successful[0][0], 1000)
+        self.assertEqual(rpc.successful[-1][1], 1999)
+        self.assertEqual(
+            sum(end - start + 1 for start, end in rpc.successful), 1000
+        )
+
     def test_decodes_legacy_deposit_event_without_indexed_arguments(self):
         pool = "0x" + "a" * 40
         user = "0x" + "b" * 40
         log = {
             "address": LOCKER,
-            "topics": [ON_DEPOSIT_LEGACY],
+            "topics": ["0x" + "d" * 64],
             "data": "0x" + "".join([
                 address_word(pool), address_word(user), word(1000),
                 word(1700000000), word(1900000000),
@@ -81,7 +118,7 @@ class UncxBscLegacyAbiTests(unittest.TestCase):
             "blockNumber": "0x123",
             "logIndex": "0x2",
         }
-        event = decode_legacy_deposit(log)
+        event = decode_legacy_deposit(log, "0x" + "d" * 64)
         self.assertEqual(event["lp_token"], pool)
         self.assertEqual(event["user"], user)
         self.assertEqual(event["amount_raw"], "1000")

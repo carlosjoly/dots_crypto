@@ -28,7 +28,7 @@ GET_USER_NUM_LOCKS = "0xa69d9c4f"
 GET_USER_LOCK = "0xd4ff493f"
 TOKEN_LOCKS = "0xccebfa3f"
 ON_NEW_LOCK = "0x3e5a874dd8f086c73bba5a860cb04972e50b6207f84cc020037d576afa6ebc13"
-ON_DEPOSIT_LEGACY = "0x830357565da6ecfc26d8d9f69df488ed6f70361af9a07e570544aeb5c5e765e"
+ON_DEPOSIT_LEGACY_SIGNATURE = "onDeposit(address,address,uint256,uint256,uint256)"
 
 
 class DiagnosticError(RuntimeError):
@@ -98,12 +98,12 @@ def decode_legacy_lock(raw):
     }
 
 
-def decode_legacy_deposit(log):
+def decode_legacy_deposit(log, event_topic):
     """Decode legacy onDeposit(address,address,uint256,uint256,uint256); no indexed args."""
     if str(log.get("address", "")).lower() != LOCKER:
         raise DiagnosticError("legacy deposit log has the wrong contract address")
     topics = log.get("topics") or []
-    if len(topics) != 1 or str(topics[0]).lower() != ON_DEPOSIT_LEGACY:
+    if len(topics) != 1 or str(topics[0]).lower() != str(event_topic).lower():
         raise DiagnosticError("invalid legacy onDeposit topics")
     lp_token, user, amount, lock_date, unlock_date = decode_words(log.get("data"), 5)
     return {
@@ -163,6 +163,15 @@ def _function_selector(rpc, signature):
     return digest[:10]
 
 
+def _event_topic(rpc, signature):
+    """Derive a full event topic with Ethereum Keccak via the configured RPC."""
+    payload = "0x" + signature.encode("ascii").hex()
+    digest = rpc.call("web3_sha3", [payload])
+    if not isinstance(digest, str) or not re.fullmatch(r"0x[a-fA-F0-9]{64}", digest):
+        raise DiagnosticError(f"{signature}: invalid web3_sha3 response")
+    return digest.lower()
+
+
 def _eth_call(rpc, to, data, block_tag):
     result = rpc.call("eth_call", [{"to": to, "data": data}, block_tag])
     if not isinstance(result, str) or not result.startswith("0x"):
@@ -175,12 +184,27 @@ def _uint_call(rpc, to, data, block_tag):
 
 
 def _chunked_logs(rpc, query, start, end, chunk_size):
+    """Fetch bounded log ranges, shrinking chunks when an RPC rejects the range."""
     logs = []
     cursor = start
+    current_chunk = chunk_size
     while cursor <= end:
-        stop = min(end, cursor + chunk_size - 1)
+        stop = min(end, cursor + current_chunk - 1)
         request = dict(query, fromBlock=hex(cursor), toBlock=hex(stop))
-        result = rpc.call("eth_getLogs", [request])
+        try:
+            result = rpc.call("eth_getLogs", [request])
+        except DiagnosticError as exc:
+            message = str(exc).lower()
+            range_too_large = (
+                "block range is too large" in message
+                or "range is too large" in message
+                or "query returned more than" in message
+                or "maximum block range" in message
+            )
+            if not range_too_large or current_chunk <= 100:
+                raise
+            current_chunk = max(100, current_chunk // 2)
+            continue
         if not isinstance(result, list):
             raise DiagnosticError("eth_getLogs returned a non-list result")
         logs.extend(result)
@@ -253,13 +277,14 @@ def diagnose_pool(rpc, pool, block, lookback_blocks, chunk_size):
                 if event["pool"] == pool:
                     decoded_events.append(event)
 
-        # Legacy onDeposit has no indexed fields in the published legacy ABI.
+        # Derive the full legacy event topic; keep the signature as the source of truth.
+        legacy_deposit_topic = _event_topic(rpc, ON_DEPOSIT_LEGACY_SIGNATURE)
         legacy_logs = _chunked_logs(rpc, {
-            "address": LOCKER, "topics": [ON_DEPOSIT_LEGACY],
+            "address": LOCKER, "topics": [legacy_deposit_topic],
         }, start, block_number, chunk_size)
         legacy_pool_events = []
         for item in legacy_logs:
-            event = decode_legacy_deposit(item)
+            event = decode_legacy_deposit(item, legacy_deposit_topic)
             if event["lp_token"] == pool:
                 legacy_pool_events.append(event)
 
@@ -348,7 +373,7 @@ def diagnose_pool(rpc, pool, block, lookback_blocks, chunk_size):
                     raise DiagnosticError("legacy receipt block does not match onDeposit event block")
                 exact_event = any(
                     str(item.get("address", "")).lower() == LOCKER
-                    and [str(topic).lower() for topic in (item.get("topics") or [])] == [ON_DEPOSIT_LEGACY]
+                    and [str(topic).lower() for topic in (item.get("topics") or [])] == [legacy_deposit_topic]
                     and str(item.get("data", "")).lower() == event["raw_data"]
                     for item in (receipt.get("logs") or [])
                 )
