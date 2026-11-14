@@ -31,7 +31,6 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_uncx_bsc_*.py' -v
       - name: Run read-only UNCX deployed ABI diagnostic
         id: diagnostic
-        continue-on-error: true
         env:
           BOT_F_RPC_URL_BSC: ${{ secrets.BOT_F_RPC_URL_BSC }}
           LOOKBACK_BLOCKS: ${{ inputs.lookback_blocks }}
