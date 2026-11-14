@@ -1,6 +1,8 @@
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
+import requests
 from pathlib import Path
 from app.onchain_lp import build_independent_lp_proof, verify_v2_pool_reserves
 
@@ -10,6 +12,17 @@ LOCK = "0x" + "e" * 40
 
 def word(n): return format(n, "064x")
 def address_word(value): return "0x" + value[2:].lower().rjust(64, "0")
+
+class JsonRpcRedactionTests(unittest.TestCase):
+    @patch("app.onchain_lp.requests.post", side_effect=requests.exceptions.Timeout("secret-api-key-in-url"))
+    def test_transport_error_does_not_echo_rpc_endpoint_or_credentials(self, post):
+        from app.onchain_lp import JsonRpc, VerificationError
+        rpc = JsonRpc("https://provider.example/v1/secret-api-key")
+        with self.assertRaises(VerificationError) as caught:
+            rpc.call("eth_chainId", [])
+        self.assertIn("endpoint redacted", str(caught.exception))
+        self.assertNotIn("secret-api-key", str(caught.exception))
+
 
 class FakeRpc:
     def __init__(self, chain="0x2105", factory=FACTORY, pair=POOL, reserves=(1000000, 2000000)):
