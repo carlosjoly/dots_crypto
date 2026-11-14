@@ -95,6 +95,7 @@ class HistoricalEventStudyTests(unittest.TestCase):
         self.assertFalse(is_documented_spot_outage_gap("2023-03-24T11:15:00Z", "15m"))
         self.assertFalse(is_documented_spot_outage_gap("2023-03-24T14:00:00Z", "15m"))
         self.assertFalse(is_documented_spot_outage_gap("2023-03-25T12:45:00Z", "15m"))
+        self.assertFalse(is_documented_spot_outage_gap("2023-03-24T12:00:00Z", "4h"))
 
     def test_24h_quote_volume_uses_elapsed_window_not_last_n_rows(self):
         frame = pd.DataFrame({
