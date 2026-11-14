@@ -99,14 +99,14 @@ class EdgeTriggeredSignalTests(unittest.TestCase):
             for x in confirmed
         ), 1)
 
-    def test_1h_and_4h_keep_the_previous_swing_transition_rule(self):
+    def test_1h_and_4h_swing_requires_pullback_and_confirmed_reclaim(self):
         for timeframe in ("1h", "4h"):
             frame = make_frame()
             frame.loc[58, ["low", "close", "high", "sma20", "sma50", "rsi14", "rel_volume"]] = [
-                103, 104, 106, 105, 100, 50, 1.2
+                104, 108, 109, 105, 100, 50, 1.0
             ]
             frame.loc[59, ["low", "close", "high", "sma20", "sma50", "rsi14", "rel_volume"]] = [
-                108, 110, 111, 105, 100, 51, 1.2
+                107, 112, 113, 106, 100, 52, 1.3
             ]
             alerts = run_market_agents_enriched("BTCUSDT", timeframe, frame, config())
             with self.subTest(timeframe=timeframe):
