@@ -67,12 +67,43 @@ class UncxBscLegacyAbiTests(unittest.TestCase):
         with self.assertRaises(DiagnosticError):
             decode_legacy_lock(raw)
 
+    def test_derives_full_legacy_event_topic(self):
+        class FakeRpc:
+            def call(self, method, params):
+                self.assertion = (method, params)
+                return "0x" + "cd" * 32
+
+        rpc = FakeRpc()
+        topic = _event_topic(rpc, ON_DEPOSIT_LEGACY_SIGNATURE)
+        self.assertEqual(topic, "0x" + "cd" * 32)
+        self.assertEqual(rpc.assertion[0], "web3_sha3")
+
+    def test_chunked_logs_reduces_range_after_rpc_limit_error(self):
+        class FakeRpc:
+            def __init__(self):
+                self.ranges = []
+
+            def call(self, method, params):
+                query = params[0]
+                start = int(query["fromBlock"], 16)
+                end = int(query["toBlock"], 16)
+                self.ranges.append((start, end))
+                if end - start + 1 > 500:
+                    raise DiagnosticError("eth_getLogs: Block range is too large")
+                return []
+
+        rpc = FakeRpc()
+        self.assertEqual(_chunked_logs(rpc, {}, 1000, 1999, 2000), [])
+        self.assertTrue(all(end - start + 1 <= 500 for start, end in rpc.ranges))
+        self.assertEqual(rpc.ranges[0], (1000, 1999))
+        self.assertEqual(rpc.ranges[-1][1], 1999)
+
     def test_decodes_legacy_deposit_event_without_indexed_arguments(self):
         pool = "0x" + "a" * 40
         user = "0x" + "b" * 40
         log = {
             "address": LOCKER,
-            "topics": [ON_DEPOSIT_LEGACY],
+            "topics": ["0x" + "d" * 64],
             "data": "0x" + "".join([
                 address_word(pool), address_word(user), word(1000),
                 word(1700000000), word(1900000000),
@@ -81,7 +112,7 @@ class UncxBscLegacyAbiTests(unittest.TestCase):
             "blockNumber": "0x123",
             "logIndex": "0x2",
         }
-        event = decode_legacy_deposit(log)
+        event = decode_legacy_deposit(log, "0x" + "d" * 64)
         self.assertEqual(event["lp_token"], pool)
         self.assertEqual(event["user"], user)
         self.assertEqual(event["amount_raw"], "1000")
