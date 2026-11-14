@@ -61,7 +61,7 @@ def _decode_deposit_log(log):
         raise VerificationError("dados do evento onDeposit inválidos")
     return {
         "lp_token": _address("0x" + data[2:66]),
-        "owner": _address("0x" + data[66:130]),
+        "depositor": _address("0x" + data[66:130]),
         "amount": int(data[130:194], 16),
         "lock_date": int(data[194:258], 16),
         "unlock_date": int(data[258:322], 16),
@@ -140,7 +140,7 @@ def _find_deposit_transactions(rpc, pool_address, records, block_number, lookbac
             "transaction_hash": tx_hash,
             "event_block_number": int(str(log["blockNumber"]), 16),
             "lp_token": decoded["lp_token"],
-            "owner": decoded["owner"],
+            "depositor": decoded["depositor"],
             "amount_raw": str(decoded["amount"]),
             "lock_date": decoded["lock_date"],
             "event_unlock_date": decoded["unlock_date"],
