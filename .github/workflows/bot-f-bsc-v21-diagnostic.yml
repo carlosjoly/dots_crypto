@@ -1,4 +1,4 @@
-name: Bot F - BSC UNCX V2.1 lock diagnostic
+name: Bot F - BSC UNCX deployed ABI lock diagnostic
 
 on:
   workflow_dispatch:
@@ -25,10 +25,10 @@ jobs:
           python-version: "3.11"
       - name: Install diagnostic dependency
         run: python -m pip install "requests>=2.31,<3"
-      - name: Compile V2.1 diagnostic
+      - name: Compile deployed ABI diagnostic
         run: python -m py_compile scripts/diagnose_uncx_bsc_v21.py
-      - name: Test V2.1 diagnostic decoders
-        run: python -m unittest discover -s tests -p 'test_uncx_bsc_v21_diagnostic.py' -v
+      - name: Test UNCX legacy and V2.1 decoders
+        run: python -m unittest discover -s tests -p 'test_uncx_bsc_*.py' -v
       - name: Run read-only UNCX V2.1 diagnostic
         id: diagnostic
         continue-on-error: true
