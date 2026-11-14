@@ -47,9 +47,11 @@ def download_historical_klines(base_url, symbol, interval, start_ms, end_ms, ses
         if next_cursor <= cursor:
             raise RuntimeError(f"Historical pagination did not advance: {symbol} {interval}")
         cursor = next_cursor
-        if len(batch) < 1000:
-            break
-        time.sleep(0.15)
+        # Do not treat a short page as end-of-history: public data endpoints may
+        # return partial pages transiently. Continue from the last candle until
+        # the requested end is reached or the endpoint returns no rows.
+        if cursor < int(end_ms):
+            time.sleep(0.15)
 
     if not rows:
         raise ValueError(f"No historical candles returned: {symbol} {interval}")
@@ -98,11 +100,14 @@ def signal_direction(alert):
 
 
 def net_event_return(entry_price, exit_price, direction, fee_per_side_pct=0.10,
-                     slippage_per_side_pct=0.05):
+                     slippage_per_side_pct=0.05, spread_per_side_pct=0.125):
     if entry_price <= 0 or exit_price <= 0 or direction not in (-1, 1):
         raise ValueError("Invalid event-study price or direction")
     gross = direction * (exit_price / entry_price - 1.0) * 100.0
-    round_trip_cost = 2.0 * (float(fee_per_side_pct) + float(slippage_per_side_pct))
+    costs = (float(fee_per_side_pct), float(slippage_per_side_pct), float(spread_per_side_pct))
+    if any(value < 0 for value in costs):
+        raise ValueError("Transaction-cost assumptions cannot be negative")
+    round_trip_cost = 2.0 * sum(costs)
     return gross - round_trip_cost
 
 
@@ -117,7 +122,7 @@ def _split_for_index(index, count):
 
 
 def event_study(symbol, timeframe, candles, cfg, fee_per_side_pct=0.10,
-                slippage_per_side_pct=0.05):
+                slippage_per_side_pct=0.05, spread_per_side_pct=0.125):
     enriched = enrich(candles)
     if "quote_volume" not in enriched.columns:
         raise ValueError("Historical candles lack quote_volume; live liquidity filter cannot be approximated.")
@@ -143,7 +148,8 @@ def event_study(symbol, timeframe, candles, cfg, fee_per_side_pct=0.10,
                 entry = float(enriched.iloc[entry_index]["open"])
                 exit_price = float(enriched.iloc[exit_index]["close"])
                 net = net_event_return(
-                    entry, exit_price, direction, fee_per_side_pct, slippage_per_side_pct
+                    entry, exit_price, direction, fee_per_side_pct,
+                    slippage_per_side_pct, spread_per_side_pct
                 )
                 records.append({
                     "symbol": symbol,
@@ -158,7 +164,7 @@ def event_study(symbol, timeframe, candles, cfg, fee_per_side_pct=0.10,
                     "entry_price": entry,
                     "exit_price": exit_price,
                     "gross_return_pct": direction * (exit_price / entry - 1.0) * 100.0,
-                    "estimated_round_trip_cost_pct": 2.0 * (fee_per_side_pct + slippage_per_side_pct),
+                    "estimated_round_trip_cost_pct": 2.0 * (fee_per_side_pct + slippage_per_side_pct + spread_per_side_pct),
                     "net_return_pct": net,
                     "split": split,
                 })
@@ -187,7 +193,8 @@ def summarize_events(records):
     return summary
 
 
-def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05):
+def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
+        spread_per_side_pct=0.125):
     cfg = load_config()
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=int(days))
@@ -211,7 +218,7 @@ def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05):
                 candles.to_csv(path, index=False)
                 records = event_study(
                     symbol, timeframe, candles, cfg,
-                    fee_per_side_pct, slippage_per_side_pct,
+                    fee_per_side_pct, slippage_per_side_pct, spread_per_side_pct,
                 )
                 all_records.extend(records)
                 dataset_manifest.append({
@@ -239,10 +246,11 @@ def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05):
         "days_requested": int(days),
         "fee_per_side_pct_assumption": fee_per_side_pct,
         "slippage_per_side_pct_assumption": slippage_per_side_pct,
-        "round_trip_cost_pct_assumption": 2 * (fee_per_side_pct + slippage_per_side_pct),
+        "spread_per_side_pct_assumption": spread_per_side_pct,
+        "round_trip_cost_pct_assumption": 2 * (fee_per_side_pct + slippage_per_side_pct + spread_per_side_pct),
         "horizons_bars": list(HORIZONS),
         "splits": {"train": "first 60%", "validation": "next 20%", "test": "last 20%"},
-        "historical_market_filter": "24h quote volume is approximated from candle quote_volume; historical bid/ask spread is unavailable and therefore not reconstructed. Results are not an exact replay of live symbol eligibility.",
+        "historical_market_filter": "24h quote volume is approximated from candle quote_volume; historical bid/ask spread is unavailable. A conservative 0.125% per-side spread proxy is applied by default (half the live 0.25% maximum-spread filter), not represented as observed historical spread.",
         "warning": "Signals are evaluated independently and may overlap. Bullish outcomes are Spot-long directional studies; bearish outcomes are inverse directional research, not short-selling trades and not executable on Binance Spot. Results are not portfolio returns or calibrated probabilities.",
         "summary": summary,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -258,9 +266,12 @@ if __name__ == "__main__":
     parser.add_argument("--days", type=int, default=1460)
     parser.add_argument("--fee-per-side-pct", type=float, default=0.10)
     parser.add_argument("--slippage-per-side-pct", type=float, default=0.05)
+    parser.add_argument("--spread-per-side-pct", type=float, default=0.125,
+                        help="Conservative estimated spread cost per side, in percent")
     args = parser.parse_args()
     if args.days < 60 or args.days > 1460:
         parser.error("--days must be between 60 and 1460")
-    if args.fee_per_side_pct < 0 or args.slippage_per_side_pct < 0:
+    if min(args.fee_per_side_pct, args.slippage_per_side_pct, args.spread_per_side_pct) < 0:
         parser.error("cost assumptions cannot be negative")
-    raise SystemExit(run(args.days, args.fee_per_side_pct, args.slippage_per_side_pct))
+    raise SystemExit(run(args.days, args.fee_per_side_pct, args.slippage_per_side_pct,
+                         args.spread_per_side_pct))
