@@ -203,7 +203,7 @@ class UncxBscLockTests(unittest.TestCase):
             expected_locker_code_hash=CODE_HASH,
         )
         self.assertEqual(result["status"], "lock_verified_transaction_linked")
-        self.assertEqual(result["lock_transactions"][0]["owner"], "0x" + "f" * 40)
+        self.assertEqual(result["lock_transactions"][0]["depositor"], "0x" + "f" * 40)
 
     def test_missing_deposit_event_fails_closed(self):
         result = verify_uncx_bsc_pancakeswap_v2_lock(
