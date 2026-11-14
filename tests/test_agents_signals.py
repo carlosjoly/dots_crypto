@@ -132,6 +132,15 @@ class ActiveAgentSignalTests(unittest.TestCase):
             for x in alerts
         ))
 
+    def test_all_market_agent_alerts_are_explicitly_experimental(self):
+        data = frame(change_pct=1.8, rel_volume=1.8, rsi14=60.0)
+        alert = next(
+            x for x in run_market_agents_enriched("BTCUSDT", "15m", data, CFG)
+            if x["agent"] == "Bot A — Altas expressivas"
+        )
+        self.assertEqual(alert["validation_status"], "experimental")
+        self.assertIs(alert["execution_eligible"], False)
+
     def test_no_agent_emits_signal_when_all_conditions_are_neutral(self):
         self.assertEqual(self.agents(frame()), [])
 
