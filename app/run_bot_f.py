@@ -1,13 +1,15 @@
 """Standalone scheduled runner for Bot F; no trading or order execution."""
 import logging
+import os
 
 from .alerts import emit_alert
 from .config import load_config
 from .logging_setup import setup_logging
 from .new_launches import (
     release_seen_token, scan_new_launches, fetch_current_pool_liquidity,
-    independent_lp_proof_is_valid,
 )
+from .onchain_lp import JsonRpc
+from .uncx_bsc_lock import build_bsc_pancakeswap_v2_lp_proof, is_valid_bsc_pancakeswap_v2_lp_proof
 
 log = logging.getLogger("dot_cripto.bot_f.runner")
 
@@ -38,6 +40,14 @@ def main():
                 alert.get("pool_id", alert.get("symbol", "N/D")),
             )
             continue
+        if alert.get("network") != "bsc" or str(alert.get("chain_id")) != "56":
+            log.warning("Bot F Telegram bloqueado: sem adaptador de lock on-chain aprovado para %s/%s.",
+                        alert.get("network", "N/D"), alert.get("pool_id", alert.get("symbol", "N/D")))
+            continue
+        rpc_url = os.getenv("BOT_F_RPC_URL_BSC", "").strip()
+        if not rpc_url.startswith(("https://", "http://")):
+            log.error("Bot F BSC bloqueado: BOT_F_RPC_URL_BSC ausente ou inválido; endpoint não será exibido.")
+            continue
         try:
             fresh = fetch_current_pool_liquidity(alert.get("network"), alert.get("pool_address"))
             if fresh["classification"] != "passed":
@@ -47,11 +57,14 @@ def main():
                     alert.get("pool_id", alert.get("symbol", "N/D")),
                 )
                 continue
-            if not independent_lp_proof_is_valid(alert):
-                log.warning(
-                    "Bot F Telegram bloqueado: sem prova independente on-chain de reservas e bloqueio LP para %s.",
-                    alert.get("pool_id", alert.get("symbol", "N/D")),
-                )
+            # Replace discovery-supplied metadata with a fresh read-only RPC proof.
+            proof = build_bsc_pancakeswap_v2_lp_proof(
+                alert.get("pool_address"), JsonRpc(rpc_url), liquidity_usd=fresh["liquidity_usd"]
+            )
+            alert["independent_lp_proof"] = proof
+            if not is_valid_bsc_pancakeswap_v2_lp_proof(proof, alert.get("pool_address"), fresh["liquidity_usd"]):
+                log.warning("Bot F Telegram bloqueado: prova UNCX/BSC não aprovada para %s; status=%s; motivo=%s",
+                            alert.get("pool_id", alert.get("symbol", "N/D")), proof.get("status"), proof.get("reason"))
                 continue
             alert["liquidity_usd"] = fresh["liquidity_usd"]
             emit_alert(cfg, alert)
