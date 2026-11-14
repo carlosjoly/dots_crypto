@@ -1,0 +1,40 @@
+name: Bot F - BSC UNCX adapter live validation
+
+on:
+  push:
+    branches:
+      - fix/bot-f-bsc-runtime-proof-integration
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-adapter-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install read-only diagnostic dependency
+        run: python -m pip install "requests>=2.31,<3"
+      - name: Compile adapter and live validation
+        run: python -m py_compile app/onchain_lp.py app/uncx_bsc_lock.py scripts/validate_bot_f_uncx_adapter.py
+      - name: Run live read-only UNCX adapter validation
+        env:
+          BOT_F_RPC_URL_BSC: ${{ secrets.BOT_F_RPC_URL_BSC }}
+        run: python scripts/validate_bot_f_uncx_adapter.py
+      - name: Upload adapter validation result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bot-f-uncx-adapter-validation-${{ github.run_id }}
+          path: data/bot_f_uncx_adapter_validation.json
+          if-no-files-found: warn
+          retention-days: 7
