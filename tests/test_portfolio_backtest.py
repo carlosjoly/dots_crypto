@@ -70,7 +70,8 @@ class MarketModeSeparationTests(unittest.TestCase):
         rows = [{
             "split": "test", "market_mode": "spot_long",
             "agent": "Bot A — Altas expressivas", "timeframe": "1h",
-            "trades": 49, "total_return_pct": 2.0,
+            "trades": 49, "total_return_pct": 2.0, "excess_vs_benchmark_pct": 1.0,
+            "profit_factor": 1.2, "max_drawdown_pct": -5.0,
         }]
         self.assertEqual(len(failed_spot_long_test_rows(rows)), 1)
         rows[0]["trades"] = 50
