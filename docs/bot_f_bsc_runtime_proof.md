@@ -48,3 +48,10 @@ Only BSC / PancakeSwap V2 / this pinned UNCX locker has a reviewed adapter. Othe
 ## Live validation
 
 The workflow **Bot F - BSC UNCX adapter live validation** runs on pushes to the integration branch and can also be dispatched manually after merge. It checks the two known pools and uploads a read-only JSON artifact. Expected no-lock results are reported as `no_active_locks_confirmed`, not as approvals.
+
+
+## Evidência live de reservas e lock
+
+O workflow de validação read-only executa agora, para cada pool, primeiro `verify_v2_pool_reserves` e depois o adaptador UNCX no mesmo bloco. O JSON inclui token0/token1, factory, confirmação de `factory.getPair`, reservas, totalSupply e hash do bloco, além da identidade do locker. O artefato também inclui `data/bot_f_onchain_audit.jsonl` com os registos individuais das consultas.
+
+`no_active_locks_confirmed` significa que a identidade do par e do locker foi validada, mas não existe lock ativo; nunca é aprovação. `active_lock_verified` é apenas resultado diagnóstico e mantém `approval=false`; o runner continua a exigir a própria prova RPC combinada e liquidez fresca antes do Telegram.
