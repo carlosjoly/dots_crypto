@@ -68,6 +68,10 @@ class AlertFormattingTests(unittest.TestCase):
         self.assertIn("31/10/2026 às 13:14:59 (UTC-3)", message)
         self.assertEqual(message.count("Spread observado:"), 1)
 
+    def test_unclassified_alert_defaults_to_experimental(self):
+        message = format_message(self.alert)
+        self.assertIn("STATUS: EXPERIMENTAL — NÃO APROVADO PARA EXECUÇÃO.", message)
+
     def test_experimental_alert_is_visibly_not_approved_for_execution(self):
         alert = dict(
             self.alert, validation_status="experimental", execution_eligible=False
