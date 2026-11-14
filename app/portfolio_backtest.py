@@ -189,11 +189,15 @@ def simulate_portfolio(frames, events, starts, ends, initial_cash=10000.0,
             entry = opening * (1 + slip if direction == 1 else 1 - slip)
             stop = entry - direction * distance
             target = entry + direction * distance * reward_risk
+            # Size against the stop loss including round-trip fees and adverse
+            # spread/slippage, not ATR distance alone.
+            estimated_cost_per_unit = (entry + stop) * (fee + slip)
+            risk_per_unit = distance + estimated_cost_per_unit
             equity = max(0.0, _mark_equity(cash, positions, marks))
             exposure = sum(p["quantity"] * marks.get(s, p["entry_price"]) for s, p in positions.items())
             remaining = max(0.0, equity * max_exposure_fraction - exposure)
             per_position_cap = equity * max_exposure_fraction / max_positions
-            quantity = min(equity * risk_fraction / distance,
+            quantity = min(equity * risk_fraction / risk_per_unit,
                            per_position_cap / entry, remaining / entry)
             if quantity <= 0:
                 continue
