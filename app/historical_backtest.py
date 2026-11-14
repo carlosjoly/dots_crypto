@@ -230,6 +230,11 @@ def run(days=1460, fee_per_side_pct=0.10, slippage_per_side_pct=0.05,
                 log.info("Backtest dataset validado: %s %s; candles=%d; eventos=%d.",
                          symbol, timeframe, len(candles), len(records))
             except Exception as exc:
+                # Never let a previous successful download masquerade as the
+                # current failed sample in the subsequent portfolio simulation.
+                stale_path = data_dir / f"{symbol}_{timeframe}.csv"
+                if stale_path.exists():
+                    stale_path.unlink()
                 dataset_manifest.append({
                     "symbol": symbol, "timeframe": timeframe, "status": "invalid",
                     "reason": f"{type(exc).__name__}: {str(exc)[:200]}",
