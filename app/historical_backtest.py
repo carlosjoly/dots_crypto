@@ -125,6 +125,16 @@ def download_historical_klines(base_url, symbol, interval, start_ms, end_ms, ses
             f"Historical sample has {len(missing_times)} missing candles; refusing bulk repair: {symbol} {interval}"
         )
     for missing_open_ms in missing_times:
+        missing_open_time = pd.to_datetime(missing_open_ms, unit="ms", utc=True)
+        # Only internal gaps covered by Binance's published outage are
+        # exempt. Skip them before issuing any targeted recovery request.
+        if (missing_open_ms < initial_times[-1]
+                and is_documented_spot_outage_gap(missing_open_time, interval)):
+            log.warning(
+                "Skipping absent candle documented by Binance Spot outage: %s %s %s",
+                symbol, interval, missing_open_time,
+            )
+            continue
         recovered = False
         for attempt in range(3):
             try:
@@ -151,16 +161,6 @@ def download_historical_klines(base_url, symbol, interval, start_ms, end_ms, ses
             if attempt < 2:
                 time.sleep(0.25 * (attempt + 1))
         if not recovered:
-            missing_open_time = pd.to_datetime(missing_open_ms, unit="ms", utc=True)
-            # Only internal gaps covered by Binance's published outage are
-            # exempt. A missing tail candle is never excused as a past outage.
-            if (missing_open_ms < initial_times[-1]
-                    and is_documented_spot_outage_gap(missing_open_time, interval)):
-                log.warning(
-                    "Skipping absent candle documented by Binance Spot outage: %s %s %s",
-                    symbol, interval, missing_open_time,
-                )
-                continue
             raise ValueError(
                 f"Unable to recover missing candle {missing_open_ms}: {symbol} {interval}"
             )
