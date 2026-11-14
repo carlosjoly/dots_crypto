@@ -206,6 +206,16 @@ def verify_uncx_bsc_pancakeswap_v2_lock(
         if not isinstance(block_data, dict) or str(block_data.get("hash", "")).lower() != str(block["hash"]).lower():
             raise VerificationError("hash do bloco mudou durante a leitura")
         block_timestamp = int(block_data.get("timestamp", "0x0"), 16)
+        # Preserve successful identity checks even when no lock is present.
+        record.update({
+            "chain_id": str(chain_id),
+            "pool_factory": pool_factory,
+            "locker_factory": locker_factory,
+            "locker_runtime_code_hash": actual_hash.lower(),
+            "reserve_block_number": block_number,
+            "reserve_block_hash": str(block["hash"]).lower(),
+            "reserve_block_timestamp": block_timestamp,
+        })
         count = _uint_call(rpc, UNCX_BSC_PANCAKE_V2_LOCKER,
                            "getNumLocksForToken(address)", [pool_address], block_tag)
         if count < 1:
