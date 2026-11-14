@@ -135,10 +135,10 @@ class UncxBscLockTests(unittest.TestCase):
             saved = json.loads((Path(tmp) / "audit.jsonl").read_text().splitlines()[0])
             self.assertEqual(saved["status"], "lock_verified_transaction_linked")
 
-    def test_missing_runtime_hash_pin_fails_closed(self):
+    def test_reviewed_runtime_hash_pin_is_used_by_default(self):
         result = verify_uncx_bsc_pancakeswap_v2_lock(POOL, FakeRpc())
-        self.assertEqual(result["status"], "blocked")
-        self.assertIn("hash de runtime", result["reason"])
+        self.assertEqual(result["status"], "lock_verified_transaction_linked")
+        self.assertEqual(result["locker_runtime_code_hash"], CODE_HASH)
 
     def test_wrong_runtime_hash_fails_closed(self):
         result = verify_uncx_bsc_pancakeswap_v2_lock(
