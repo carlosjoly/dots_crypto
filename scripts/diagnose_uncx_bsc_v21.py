@@ -390,7 +390,8 @@ def main():
             diagnose_pool(rpc, pool, block, args.lookback_blocks, args.chunk_size)
             for pool in pools
         ]
-        output["status"] = "completed"
+        output["pool_error_count"] = sum(item.get("status") == "error" for item in output["pools"])
+        output["status"] = "completed_with_pool_errors" if output["pool_error_count"] else "completed"
         output["warning"] = (
             "Observational only. Bounded event history, runtime hash and linked receipts do not "
             "authenticate UNCX deployment independently, calculate USD liquidity, or approve alerts."
