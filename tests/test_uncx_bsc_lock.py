@@ -196,6 +196,15 @@ class UncxBscLockTests(unittest.TestCase):
             self.assertEqual(result["lock_evidence_type"], "UNCX_V2_storage_balance_event_and_receipt")
 
 
+    def test_depositor_may_differ_from_stored_lock_owner(self):
+        # onDeposit.user is the depositor, while tokenLocks.owner is the lock owner.
+        result = verify_uncx_bsc_pancakeswap_v2_lock(
+            POOL, FakeRpc(event_user="0x" + "f" * 40),
+            expected_locker_code_hash=CODE_HASH,
+        )
+        self.assertEqual(result["status"], "lock_verified_transaction_linked")
+        self.assertEqual(result["lock_transactions"][0]["owner"], "0x" + "f" * 40)
+
     def test_missing_deposit_event_fails_closed(self):
         result = verify_uncx_bsc_pancakeswap_v2_lock(
             POOL, FakeRpc(omit_deposit=True), expected_locker_code_hash=CODE_HASH,
