@@ -195,8 +195,9 @@ class UncxBscLockTests(unittest.TestCase):
             self.assertEqual(result["pool_factory"], PANCAKE_V2_FACTORY)
             self.assertEqual(result["locker_factory"], PANCAKE_V2_FACTORY)
             self.assertEqual(result["lock_evidence_type"], "UNCX_V2_storage_balance_event_and_receipt")
-            self.assertTrue(is_valid_bsc_pancakeswap_v2_lp_proof(result, POOL, 30000))
-            self.assertFalse(is_valid_bsc_pancakeswap_v2_lp_proof(result, "0x" + "b" * 40, 30000))
+            self.assertTrue(is_valid_bsc_pancakeswap_v2_lp_proof(result, POOL, 30000, TOKEN0))
+            self.assertFalse(is_valid_bsc_pancakeswap_v2_lp_proof(result, "0x" + "b" * 40, 30000, TOKEN0))
+            self.assertFalse(is_valid_bsc_pancakeswap_v2_lp_proof(result, POOL, 30000, "0x" + "f" * 40))
 
 
     def test_depositor_may_differ_from_stored_lock_owner(self):
