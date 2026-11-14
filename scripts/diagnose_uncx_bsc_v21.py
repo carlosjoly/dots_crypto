@@ -98,12 +98,12 @@ def decode_legacy_lock(raw):
     }
 
 
-def decode_legacy_deposit(log):
+def decode_legacy_deposit(log, event_topic):
     """Decode legacy onDeposit(address,address,uint256,uint256,uint256); no indexed args."""
     if str(log.get("address", "")).lower() != LOCKER:
         raise DiagnosticError("legacy deposit log has the wrong contract address")
     topics = log.get("topics") or []
-    if len(topics) != 1 or str(topics[0]).lower() != ON_DEPOSIT_LEGACY:
+    if len(topics) != 1 or str(topics[0]).lower() != str(event_topic).lower():
         raise DiagnosticError("invalid legacy onDeposit topics")
     lp_token, user, amount, lock_date, unlock_date = decode_words(log.get("data"), 5)
     return {
@@ -283,7 +283,7 @@ def diagnose_pool(rpc, pool, block, lookback_blocks, chunk_size):
         }, start, block_number, chunk_size)
         legacy_pool_events = []
         for item in legacy_logs:
-            event = decode_legacy_deposit(item)
+            event = decode_legacy_deposit(item, legacy_deposit_topic)
             if event["lp_token"] == pool:
                 legacy_pool_events.append(event)
 
@@ -372,7 +372,7 @@ def diagnose_pool(rpc, pool, block, lookback_blocks, chunk_size):
                     raise DiagnosticError("legacy receipt block does not match onDeposit event block")
                 exact_event = any(
                     str(item.get("address", "")).lower() == LOCKER
-                    and [str(topic).lower() for topic in (item.get("topics") or [])] == [ON_DEPOSIT_LEGACY]
+                    and [str(topic).lower() for topic in (item.get("topics") or [])] == [legacy_deposit_topic]
                     and str(item.get("data", "")).lower() == event["raw_data"]
                     for item in (receipt.get("logs") or [])
                 )
