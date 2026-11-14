@@ -25,6 +25,7 @@ def frame(**overrides):
     rows = []
     for index in range(55):
         rows.append({
+            "open": 100.0,
             "close": 100.0,
             "high": 110.0,
             "low": 90.0,
