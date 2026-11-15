@@ -1,0 +1,142 @@
+name: Bot F operational canary (isolated)
+
+on:
+  push:
+    branches:
+      - fix/bot-f-bsc-v2-gates-telemetry
+    paths:
+      - ".github/workflows/bot-f-operational-canary.yml"
+      - "app/run_bot_f.py"
+      - "app/new_launches.py"
+      - "app/alerts.py"
+      - "tests/test_bot_f_runner.py"
+      - "tests/test_bot_f_hardening.py"
+      - "tests/test_telegram_delivery.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bot-f-operational-canary
+  cancel-in-progress: false
+
+jobs:
+  seed-legacy-cache-fixtures:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create isolated legacy cache fixtures
+        shell: bash
+        run: |
+          mkdir -p data
+          printf '%s\n' '{"tokens":["0x1111111111111111111111111111111111111111"]}' > data/bot_f_seen.json
+          printf '%s\n' '{"0x2222222222222222222222222222222222222222":{"status":"review","last_checked":"2026-11-15T00:00:00Z"}}' > data/bot_f_review_state.json
+      - name: Save legacy seen cache fixture
+        uses: actions/cache/save@v4
+        with:
+          path: data/bot_f_seen.json
+          key: bot-f-seen-${{ runner.os }}-${{ github.ref_name }}-canary-${{ github.run_id }}
+      - name: Save legacy review cache fixture
+        uses: actions/cache/save@v4
+        with:
+          path: data/bot_f_review_state.json
+          key: bot-f-review-state-${{ runner.os }}-${{ github.ref_name }}-canary-${{ github.run_id }}
+
+  migrate-and-test:
+    needs: seed-legacy-cache-fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Restore consolidated cache (expected miss on first canary cycle)
+        id: restore-state
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/bot_f_seen.json
+            data/bot_f_review_state.json
+          key: bot-f-state-${{ runner.os }}-${{ github.ref_name }}-canary-${{ github.run_id }}
+          restore-keys: |
+            bot-f-state-${{ runner.os }}-${{ github.ref_name }}-
+      - name: Restore legacy seen cache
+        if: steps.restore-state.outputs.cache-matched-key == ''
+        uses: actions/cache/restore@v4
+        with:
+          path: data/bot_f_seen.json
+          key: bot-f-seen-${{ runner.os }}-${{ github.ref_name }}-canary-${{ github.run_id }}
+          restore-keys: |
+            bot-f-seen-${{ runner.os }}-${{ github.ref_name }}-
+      - name: Restore legacy review cache
+        if: steps.restore-state.outputs.cache-matched-key == ''
+        uses: actions/cache/restore@v4
+        with:
+          path: data/bot_f_review_state.json
+          key: bot-f-review-state-${{ runner.os }}-${{ github.ref_name }}-canary-${{ github.run_id }}
+          restore-keys: |
+            bot-f-review-state-${{ runner.os }}-${{ github.ref_name }}-
+      - name: Assert legacy state survived migration
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          seen = json.loads(Path("data/bot_f_seen.json").read_text())
+          review = json.loads(Path("data/bot_f_review_state.json").read_text())
+          assert "0x1111111111111111111111111111111111111111" in seen["tokens"], seen
+          assert review["0x2222222222222222222222222222222222222222"]["status"] == "review", review
+          print("PASS: legacy seen and review state restored without loss")
+          PY
+      - name: Save consolidated state cache
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            data/bot_f_seen.json
+            data/bot_f_review_state.json
+          key: bot-f-state-${{ runner.os }}-${{ github.ref_name }}-canary-${{ github.run_id }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compile Bot F read-only modules
+        run: python -m py_compile app/run_bot_f.py app/new_launches.py app/alerts.py app/uncx_bsc_lock.py
+      - name: Test Bot F runner, retention and mocked Telegram delivery
+        run: python -m pytest tests/test_bot_f_runner.py tests/test_bot_f_hardening.py tests/test_telegram_delivery.py -q
+      - name: Upload migrated fixture state
+        uses: actions/upload-artifact@v4
+        with:
+          name: bot-f-operational-canary-migrated-state-${{ github.run_id }}
+          path: data/
+          if-no-files-found: error
+          retention-days: 7
+
+  verify-next-cycle:
+    needs: migrate-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Restore consolidated state as next scheduled cycle would
+        id: restore-next
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/bot_f_seen.json
+            data/bot_f_review_state.json
+          key: bot-f-state-${{ runner.os }}-${{ github.ref_name }}-canary-${{ github.run_id }}
+      - name: Assert second-cycle persistence and deduplication state
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          seen = json.loads(Path("data/bot_f_seen.json").read_text())
+          review = json.loads(Path("data/bot_f_review_state.json").read_text())
+          assert "0x1111111111111111111111111111111111111111" in seen["tokens"], seen
+          assert review["0x2222222222222222222222222222222222222222"]["status"] == "review", review
+          print("PASS: consolidated seen/review state restored on simulated next cycle")
+          PY
+
+# Safety: this canary uses synthetic cache fixtures and mocked Telegram HTTP tests only.
+# It never runs app.run_bot_f, never reads production secrets, and never sends Telegram messages.
