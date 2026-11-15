@@ -37,6 +37,13 @@ jobs:
           key: alert-cooldown-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
             alert-cooldown-${{ runner.os }}-${{ github.ref_name }}-
+      - name: Restore continuous trend state
+        uses: actions/cache/restore@v4
+        with:
+          path: data/trend_monitor_state.json
+          key: trend-state-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            trend-state-${{ runner.os }}-${{ github.ref_name }}-
       - name: Restore Bot G social history
         uses: actions/cache@v4
         with:
@@ -62,6 +69,12 @@ jobs:
         with:
           path: data/alert_cooldown.json
           key: alert-cooldown-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+      - name: Save continuous trend state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/trend_monitor_state.json
+          key: trend-state-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
       - name: Upload logs and alerts
         if: always()
         uses: actions/upload-artifact@v4
