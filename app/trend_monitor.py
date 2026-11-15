@@ -79,6 +79,9 @@ class TrendStateStore:
             "regime": None, "pending_regime": None, "pending_count": 0,
             "last_candle_time_utc": None,
         })
+        # Retry an undelivered transition before evaluating newer candles.
+        if market.get("pending_alert"):
+            return dict(market["pending_alert"])
         if market.get("last_candle_time_utc") == candle_time:
             return None
         market["last_candle_time_utc"] = candle_time
@@ -94,11 +97,8 @@ class TrendStateStore:
         if market["pending_count"] < self.confirmations:
             return None
         previous = market.get("regime")
-        market["regime"] = regime
-        market["pending_regime"] = None
-        market["pending_count"] = 0
         previous_label = REGIME_LABELS.get(previous, "estado inicial")
-        return {
+        alert = {
             "agent": "Monitor contínuo de tendência",
             "symbol": symbol,
             "timeframe": timeframe,
@@ -121,6 +121,19 @@ class TrendStateStore:
             "execution_eligible": False,
             "risk_note": "Monitoramento informativo de tendência; não é recomendação nem ordem.",
         }
+        market["pending_alert"] = alert
+        return dict(alert)
+
+    def acknowledge(self, symbol, timeframe):
+        """Commit a regime transition only after its alert was delivered."""
+        market = self.state["markets"].get(self._key(symbol, timeframe))
+        if not market or not market.get("pending_alert"):
+            return False
+        market["regime"] = market.get("pending_regime")
+        market["pending_regime"] = None
+        market["pending_count"] = 0
+        market["pending_alert"] = None
+        return True
 
     def save(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
