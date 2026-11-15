@@ -83,7 +83,7 @@ class ContinuousTrendRuntimeTests(unittest.TestCase):
                 return rising_candles()
             delivered = []
             with patch("app.main.get_klines", side_effect=fetch):
-                with patch("app.main.emit_alert", side_effect=delivered.append):
+                with patch("app.main.emit_alert", side_effect=lambda _cfg, alert: delivered.append(alert)):
                     sent, failures = process_continuous_trend_monitor(cfg, "unused", store)
             self.assertEqual(sent, 1)
             self.assertEqual(len(failures), 1)
