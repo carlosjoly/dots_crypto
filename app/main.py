@@ -10,6 +10,7 @@ from .new_launches import scan_new_launches, release_seen_token
 from .bot_g import run_bot_g_observer
 from .alerts import emit_alert
 from .cooldown import CooldownStore
+from .trend_monitor import TrendStateStore, classify_trend
 from .logging_setup import setup_logging
 
 log = logging.getLogger("dot_cripto")
@@ -51,6 +52,42 @@ def process_active_market_agents(cfg, base, candidates, cooldown_store=None):
                 log.exception("Falha no ciclo do símbolo/timeframe %s %s", symbol, tf)
     return sent, failures
 
+
+
+def process_continuous_trend_monitor(cfg, base, state_store):
+    """Observe every configured symbol/timeframe independently of signal filters."""
+    sent = 0
+    failures = []
+    for symbol in cfg["exchange"]["symbols"]:
+        for timeframe in cfg["exchange"]["timeframes"]:
+            try:
+                candles = get_klines(base, symbol, timeframe, int(cfg["exchange"]["candle_limit"]))
+                snapshot = classify_trend(
+                    candles,
+                    slope_floor_pct=float(cfg.get("trend_monitor", {}).get("slope_floor_pct", 0.02)),
+                )
+                if snapshot.get("regime") is None:
+                    raise ValueError(snapshot.get("reason", "trend_not_classified"))
+                alert = state_store.observe(symbol, timeframe, snapshot)
+                if alert is not None:
+                    emit_alert(cfg, alert)
+                    state_store.acknowledge(symbol, timeframe)
+                    state_store.save()
+                    sent += 1
+                    log.info("Monitor de tendência: %s %s — %s",
+                             symbol, timeframe, alert["signal"])
+                else:
+                    log.info("Monitor de tendência: %s %s — %s (sem transição confirmada)",
+                             symbol, timeframe, snapshot["regime"])
+            except Exception as exc:
+                failures.append({
+                    "symbol": symbol,
+                    "timeframe": timeframe,
+                    "error": type(exc).__name__,
+                })
+                log.exception("Falha no monitor de tendência %s %s", symbol, timeframe)
+    state_store.save()
+    return sent, failures
 
 def main():
     cfg = load_config()
@@ -120,6 +157,17 @@ def main():
         Path(cfg["_root"]) / "data" / "alert_cooldown.json", cooldown_minutes
     )
     sent, market_failures = process_active_market_agents(cfg, base, candidates, cooldown_store)
+    trend_cfg = cfg.get("trend_monitor", {})
+    if trend_cfg.get("enabled", True):
+        trend_store = TrendStateStore(
+            Path(cfg["_root"]) / trend_cfg.get("state_file", "data/trend_monitor_state.json"),
+            confirmations=int(trend_cfg.get("confirmations", 2)),
+        )
+        trend_sent, trend_failures = process_continuous_trend_monitor(cfg, base, trend_store)
+        sent += trend_sent
+        cycle_failures.extend(
+            {"stage": "trend_monitor", **failure} for failure in trend_failures
+        )
     cycle_failures.extend(
         {"stage": "active_agent_cycle", **failure} for failure in market_failures
     )
