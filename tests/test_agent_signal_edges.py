@@ -60,8 +60,8 @@ class EdgeTriggeredSignalTests(unittest.TestCase):
         frame.loc[58, ["low", "close", "high", "sma20", "sma50", "rsi14", "rel_volume"]] = [
             104, 108, 110, 105, 100, 50, 1.0
         ]
-        frame.loc[59, ["low", "close", "high", "sma20", "sma50", "rsi14", "rel_volume"]] = [
-            107, 112, 113, 106, 100, 52, 1.3
+        frame.loc[59, ["low", "close", "high", "sma20", "sma50", "rsi14", "rel_volume", "sma20_slope_3_pct", "sma50_slope_5_pct"]] = [
+            107, 112, 113, 106, 100, 52, 1.3, 0.15, 0.08
         ]
         entered = run_market_agents_enriched("BTCUSDT", "15m", frame, config())
         self.assertEqual(sum(x["agent"] == "Bot E — Swing trade" for x in entered), 1)
