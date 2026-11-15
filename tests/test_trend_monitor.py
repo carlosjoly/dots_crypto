@@ -49,6 +49,8 @@ class TrendStateTests(unittest.TestCase):
             alert = store.observe("BTCUSDT", "15m", second)
             self.assertIn("estado inicial", alert["signal"])
             self.assertFalse(alert["execution_eligible"])
+            self.assertTrue(store.acknowledge("BTCUSDT", "15m"))
+            self.assertIsNone(store.observe("BTCUSDT", "15m", second))
 
     def test_detects_up_down_sideways_up_sequence_without_duplicate_alerts(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -63,6 +65,7 @@ class TrendStateTests(unittest.TestCase):
                 alert = store.observe("BTCUSDT", "15m", snapshot)
                 if alert:
                     alerts.append(alert)
+                    self.assertTrue(store.acknowledge("BTCUSDT", "15m"))
                 self.assertIsNone(store.observe("BTCUSDT", "15m", snapshot))
             self.assertEqual(len(alerts), 4)
             self.assertIn("tendência de alta", alerts[0]["signal"])
@@ -80,8 +83,11 @@ class TrendStateTests(unittest.TestCase):
             self.assertIsNotNone(first.observe("BTCUSDT", "15m", snapshot))
             first.save()
             restarted = TrendStateStore(path, confirmations=1)
-            self.assertIsNone(restarted.observe("BTCUSDT", "15m", snapshot))
-            self.assertEqual(restarted.state["markets"]["BTCUSDT|15m"]["regime"], "bullish")
+            self.assertIsNotNone(restarted.observe("BTCUSDT", "15m", snapshot))
+            self.assertTrue(restarted.acknowledge("BTCUSDT", "15m"))
+            restarted.save()
+            final = TrendStateStore(path, confirmations=1)
+            self.assertEqual(final.state["markets"]["BTCUSDT|15m"]["regime"], "bullish")
 
     def test_state_is_independent_per_symbol_and_timeframe(self):
         with tempfile.TemporaryDirectory() as tmp:
