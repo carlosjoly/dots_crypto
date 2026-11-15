@@ -26,7 +26,7 @@ on:
         description: "Maximum BSC blocks to search for the UNCX onDeposit transaction"
         required: false
         type: string
-        default: "15000000"
+        default: "50000"
 
 permissions:
   contents: read
