@@ -81,7 +81,7 @@ def _prune_api_metrics(now=None):
     max_bytes = max(256, int(API_METRICS_MAX_BYTES))
     while retained and sum(len(line.encode("utf-8")) + 1 for line in retained) > max_bytes:
         retained.pop(0)
-    content = "".join(line + "\\n" for line in retained)
+    content = "".join(line + "\n" for line in retained)
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(content, encoding="utf-8")
     temporary.replace(path)
