@@ -17,7 +17,7 @@ import pandas as pd
 
 from .agents import run_market_agents_enriched
 from .config import load_config
-from .historical_backtest import (BARS_PER_24H, signal_direction,
+from .historical_backtest import (BARS_PER_24H, signal_direction, is_preliminary_warning,
                                   is_documented_spot_outage_gap, rolling_24h_quote_volume)
 from .indicators import enrich
 
@@ -322,6 +322,10 @@ def _make_events(symbol, timeframe, raw, cfg):
         # breakout lookback. A 55-candle tail is sufficient and avoids O(n^2) slicing.
         window = data.iloc[max(0, i - 54):i + 1]
         for alert in run_market_agents_enriched(symbol, timeframe, window, cfg):
+            # Early regime/momentum warnings are evaluated in the event study,
+            # but must never be converted into synthetic portfolio positions.
+            if is_preliminary_warning(alert):
+                continue
             direction = signal_direction(alert)
             signal_time = pd.Timestamp(data.iloc[i]["open_time"])
             cooldown_key = (alert["agent"], alert["signal"])
