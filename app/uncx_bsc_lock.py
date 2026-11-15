@@ -68,13 +68,40 @@ def _decode_deposit_log(log):
     }
 
 
+def _block_at_or_before_timestamp(rpc, timestamp, latest_block):
+    """Binary-search BSC block timestamps to avoid scanning years of locker logs."""
+    low, high = 0, int(latest_block)
+    target = int(timestamp)
+    while low < high:
+        middle = (low + high + 1) // 2
+        block = rpc.call("eth_getBlockByNumber", [hex(middle), False])
+        if not isinstance(block, dict) or not block.get("timestamp"):
+            raise VerificationError("RPC não retornou timestamp durante a busca do bloco de lock")
+        block_timestamp = int(block["timestamp"], 16)
+        if block_timestamp <= target:
+            low = middle
+        else:
+            high = middle - 1
+    return low
+
+
 def _find_deposit_transactions(rpc, pool_address, records, block_number, lookback_blocks):
     """Link every active storage record to a successful onDeposit receipt."""
-    if int(lookback_blocks) < 1 or int(lookback_blocks) > 100000:
+    lookback = int(lookback_blocks)
+    if lookback < 1 or lookback > 20_000_000:
         raise VerificationError("lookback de eventos fora do intervalo permitido")
+    if not records:
+        raise VerificationError("nenhum registro de lock ativo para vincular")
     topic = _deposit_event_topic(rpc)
-    start = max(0, int(block_number) - int(lookback_blocks))
     end = int(block_number)
+    earliest_lock_date = min(int(record["lock_date"]) for record in records)
+    first_lock_block = _block_at_or_before_timestamp(rpc, earliest_lock_date, end)
+    start = max(0, first_lock_block - 2)
+    if end - start > lookback:
+        raise VerificationError(
+            "evento de lock está além do lookback máximo configurado; "
+            "aumente lookback_blocks para validar o histórico completo"
+        )
     logs = []
     chunk_size = 5000
     cursor = start
@@ -291,7 +318,7 @@ def verify_uncx_bsc_pancakeswap_v2_lock(
 
 def build_bsc_pancakeswap_v2_lp_proof(pool_address, rpc, allowed_factories=None,
                                       expected_locker_code_hash=None, audit_path=None,
-                                      liquidity_usd=None, lookback_blocks=50000):
+                                      liquidity_usd=None, lookback_blocks=15_000_000):
     """Combine independent pool/reserve proof with the specific UNCX LP lock."""
     snapshot = verify_v2_pool_reserves(
         "bsc", pool_address,
