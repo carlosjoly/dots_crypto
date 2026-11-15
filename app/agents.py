@@ -240,7 +240,11 @@ def diagnose_market_agents(symbol, tf, df, cfg, alerts=None):
     rv, change, rsi = float(r["rel_volume"]), float(r["change_pct"]), float(r["rsi14"])
     emitted = {(x.get("agent"), x.get("signal")) for x in (alerts or [])}
     def record(agent, criteria, signal=None):
-        passed = all(bool(v) for v in criteria.values())
+        groups = [value for value in criteria.values() if isinstance(value, dict)]
+        passed = (
+            any(all(bool(item) for item in group.values()) for group in groups)
+            if groups else all(bool(value) for value in criteria.values())
+        )
         matching = any(name == agent for name, _ in emitted)
         return {
             "agent": agent, "symbol": symbol, "timeframe": tf,
@@ -276,27 +280,62 @@ def diagnose_market_agents(symbol, tf, df, cfg, alerts=None):
         record("Bot A — Altas expressivas", {"move_threshold_met": change >= move_threshold, "relative_volume_met": rv >= float(t["relative_volume"])}),
         record("Bot B — Quedas expressivas", {"move_threshold_met": change <= -move_threshold, "relative_volume_met": rv >= float(t["relative_volume"])}),
         record("Bot C — Reversões", {
-            "bullish_rsi_cross": prev["rsi14"] <= float(t["rsi_oversold"]) and rsi > float(t["rsi_oversold"]),
-            "bullish_price_break": r["close"] > prev["high"] and r["close"] > r["open"],
-            "bearish_rsi_cross": prev["rsi14"] >= float(t["rsi_overbought"]) and rsi < float(t["rsi_overbought"]),
-            "bearish_price_break": r["close"] < prev["low"] and r["close"] < r["open"],
-            "reversal_volume_met": rv >= float(t.get("reversal_relative_volume", 1.5)),
-            "bullish_midline_shift": prev["rsi14"] <= 50 < rsi and r["close"] > r["sma20"] and r["close"] > r["open"] and rv >= float(t.get("reversal_momentum_relative_volume", 1.2)),
-            "bearish_midline_shift": prev["rsi14"] >= 50 > rsi and r["close"] < r["sma20"] and r["close"] < r["open"] and rv >= float(t.get("reversal_momentum_relative_volume", 1.2)),
+            "bullish_extreme_reversal": {
+                "rsi_cross": bool(prev["rsi14"] <= float(t["rsi_oversold"]) and rsi > float(t["rsi_oversold"])),
+                "price_break": bool(r["close"] > prev["high"] and r["close"] > r["open"]),
+                "volume": rv >= float(t.get("reversal_relative_volume", 1.5)),
+            },
+            "bearish_extreme_reversal": {
+                "rsi_cross": bool(prev["rsi14"] >= float(t["rsi_overbought"]) and rsi < float(t["rsi_overbought"])),
+                "price_break": bool(r["close"] < prev["low"] and r["close"] < r["open"]),
+                "volume": rv >= float(t.get("reversal_relative_volume", 1.5)),
+            },
+            "bullish_midline_shift": {
+                "rsi_cross": bool(prev["rsi14"] <= 50 < rsi),
+                "price_above_sma20": bool(r["close"] > r["sma20"]),
+                "bullish_candle": bool(r["close"] > r["open"]),
+                "volume": rv >= float(t.get("reversal_momentum_relative_volume", 1.2)),
+            },
+            "bearish_midline_shift": {
+                "rsi_cross": bool(prev["rsi14"] >= 50 > rsi),
+                "price_below_sma20": bool(r["close"] < r["sma20"]),
+                "bearish_candle": bool(r["close"] < r["open"]),
+                "volume": rv >= float(t.get("reversal_momentum_relative_volume", 1.2)),
+            },
         }),
         record("Bot D — Rompimentos", {
-            "crossed_resistance": bool(crossed_resistance), "crossed_support": bool(crossed_support),
-            "bullish_or_bearish_regime": bool((r["close"] > r["sma20"] > r["sma50"]) or (r["close"] < r["sma20"] < r["sma50"])),
-            "candle_direction_confirmed": bool((r["close"] > r["open"]) or (r["close"] < r["open"])),
-            "relative_volume_met": rv >= min_d_volume,
-            "breakout_clearance_atr": bool((crossed_resistance and r["close"] > prior["high"].max() + buffer) or (crossed_support and r["close"] < prior["low"].min() - buffer)),
-            "rsi_in_directional_range": bool((float(t.get("breakout_rsi_long_min", 50)) <= rsi <= float(t.get("breakout_rsi_long_max", 75))) or (float(t.get("breakout_rsi_short_min", 25)) <= rsi <= float(t.get("breakout_rsi_short_max", 50)))),
+            "bullish_breakout": {
+                "crossed_resistance": bool(crossed_resistance),
+                "bullish_regime": bool(r["close"] > r["sma20"] > r["sma50"]),
+                "bullish_candle": bool(r["close"] > r["open"]),
+                "relative_volume": rv >= min_d_volume,
+                "breakout_clearance_atr": bool(crossed_resistance and r["close"] > prior["high"].max() + buffer),
+                "rsi_range": float(t.get("breakout_rsi_long_min", 50)) <= rsi <= float(t.get("breakout_rsi_long_max", 75)),
+            },
+            "bearish_breakdown": {
+                "crossed_support": bool(crossed_support),
+                "bearish_regime": bool(r["close"] < r["sma20"] < r["sma50"]),
+                "bearish_candle": bool(r["close"] < r["open"]),
+                "relative_volume": rv >= min_d_volume,
+                "breakout_clearance_atr": bool(crossed_support and r["close"] < prior["low"].min() - buffer),
+                "rsi_range": float(t.get("breakout_rsi_short_min", 25)) <= rsi <= float(t.get("breakout_rsi_short_max", 50)),
+            },
         }),
         record("Bot E — Swing trade", {
-            "bullish_pullback_or_bearish_retest": bool((prev["close"] > prev["sma50"] and prev["sma20"] > prev["sma50"] and prev["low"] <= prev["sma20"]) or (prev["close"] < prev["sma50"] and prev["sma20"] < prev["sma50"] and prev["high"] >= prev["sma20"])),
-            "confirmed_reclaim_or_breakdown": bool((r["close"] > r["sma20"] > r["sma50"] and r["close"] > prev["high"]) or (r["close"] < r["sma20"] < r["sma50"] and r["close"] < prev["low"])),
-            "rsi_in_swing_range": bool((float(t.get("swing_pullback_rsi_min", 45)) <= rsi <= float(t.get("swing_pullback_rsi_max", 65))) or (float(t.get("swing_pullback_short_rsi_min", 35)) <= rsi <= float(t.get("swing_pullback_short_rsi_max", 55)))),
-            "relative_volume_met": rv >= min_swing_volume,
+            "bullish_pullback_reclaim": {
+                "bullish_prior_trend": bool(prev["close"] > prev["sma50"] and prev["sma20"] > prev["sma50"]),
+                "pullback_to_sma20": bool(prev["low"] <= prev["sma20"]),
+                "confirmed_reclaim": bool(r["close"] > r["sma20"] > r["sma50"] and r["close"] > prev["high"]),
+                "rsi_range": float(t.get("swing_pullback_rsi_min", 45)) <= rsi <= float(t.get("swing_pullback_rsi_max", 65)),
+                "relative_volume": rv >= min_swing_volume,
+            },
+            "bearish_retest_breakdown": {
+                "bearish_prior_trend": bool(prev["close"] < prev["sma50"] and prev["sma20"] < prev["sma50"]),
+                "retest_to_sma20": bool(prev["high"] >= prev["sma20"]),
+                "confirmed_breakdown": bool(r["close"] < r["sma20"] < r["sma50"] and r["close"] < prev["low"]),
+                "rsi_range": float(t.get("swing_pullback_short_rsi_min", 35)) <= rsi <= float(t.get("swing_pullback_short_rsi_max", 55)),
+                "relative_volume": rv >= min_swing_volume,
+            },
         }),
         record("Bot E — Mudança de regime", {
             "previous_bullish_structure": bool(prior_bull), "close_below_sma20": bool(r["close"] < r["sma20"]),
