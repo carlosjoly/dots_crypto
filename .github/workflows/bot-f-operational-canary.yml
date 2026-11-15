@@ -123,8 +123,8 @@ jobs:
       - name: Validate and fingerprint actual restored state
         id: manifest
         run: |
-          python - <<'PY' >> "$GITHUB_OUTPUT"
-          import hashlib, json
+          python - <<'PY'
+          import hashlib, json, os
           from pathlib import Path
           seen_path = Path("data/bot_f_seen.json")
           review_path = Path("data/bot_f_review_state.json")
@@ -134,10 +134,11 @@ jobs:
           assert isinstance(review, dict) and len(review) > 0, "legacy review state missing/invalid"
           seen_sha = hashlib.sha256(seen_path.read_bytes()).hexdigest()
           review_sha = hashlib.sha256(review_path.read_bytes()).hexdigest()
-          print(f"seen_sha={seen_sha}")
-          print(f"review_sha={review_sha}")
-          print(f"seen_count={len(seen)}")
-          print(f"review_count={len(review)}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"seen_sha={seen_sha}\n")
+              output.write(f"review_sha={review_sha}\n")
+              output.write(f"seen_count={len(seen)}\n")
+              output.write(f"review_count={len(review)}\n")
           print(f"PASS: actual main state restored: seen={len(seen)} review={len(review)}")
           PY
       # Writes only a unique cache in this PR branch namespace, never a main cache key.
