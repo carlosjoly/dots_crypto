@@ -4,7 +4,7 @@
 
 **Status: VALIDATED — READ-ONLY**
 
-The live workflow run [#43713326021](https://github.com/carlosjoly/dots_crypto/actions/runs/43713326021) completed successfully. Its artifact is [bot-f-uncx-live-validation-43713326021](https://github.com/carlosjoly/dots_crypto/actions/runs/43713326021/artifacts/14160878133).
+The live workflow run [#43713363684](https://github.com/carlosjoly/dots_crypto/actions/runs/43713363684) completed successfully. Its artifact is [bot-f-uncx-live-validation-43713363684](https://github.com/carlosjoly/dots_crypto/actions/runs/43713363684/artifacts/14160938071).
 
 The diagnostic returned `status=verified` and `valid=true` for a real BNB Smart Chain PancakeSwap V2 pair. It did not send Telegram, approve a discovery candidate, sign a transaction, or submit any transaction.
 
