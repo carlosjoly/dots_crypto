@@ -36,6 +36,21 @@ class MarketRegimeTests(unittest.TestCase):
         self.assertLess(99,100.5)
         self.assertGreater(100.5,98)
 
+    def test_bot_c_warns_on_bearish_rsi_midline_shift_before_extreme_oversold(self):
+        d=frame()
+        d.loc[53,["rsi14","close","sma20","sma50"]]=[52,101,100,98]
+        d.loc[54,["rsi14","open","close","sma20","sma50","rel_volume"]]=[48,100,99,100,98,1.3]
+        alerts=run_market_agents_enriched("BTCUSDT","15m",d,CFG)
+        alert=next(x for x in alerts if x["agent"]=="Bot C — Reversões" and x["signal"]=="atenção: perda inicial do momentum")
+        self.assertFalse(alert["execution_eligible"])
+
+    def test_bot_c_does_not_warn_on_midline_cross_without_volume(self):
+        d=frame()
+        d.loc[53,["rsi14","close","sma20"]]=[52,101,100]
+        d.loc[54,["rsi14","open","close","sma20","rel_volume"]]=[48,100,99,100,0.8]
+        alerts=run_market_agents_enriched("BTCUSDT","15m",d,CFG)
+        self.assertFalse(any(x.get("signal")=="atenção: perda inicial do momentum" for x in alerts))
+
     def test_early_warning_requires_multiple_confirmations(self):
         d=frame()
         d.loc[53,["close","sma20","sma50"]]=[102,101,98]
