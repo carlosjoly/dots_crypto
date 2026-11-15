@@ -21,6 +21,9 @@ MAX_RETRIES = 3
 RETRY_JITTER_SECONDS = 2
 MIN_RETRY_AFTER_SECONDS = REQUEST_INTERVAL_SECONDS
 API_METRICS_PATH = Path(__file__).resolve().parents[1] / "data" / "bot_f_api_metrics.jsonl"
+API_METRICS_RETENTION_DAYS = 7
+API_METRICS_MAX_LINES = 5000
+API_METRICS_MAX_BYTES = 1_048_576
 POOL_DIAGNOSTICS_PATH = Path(__file__).resolve().parents[1] / "data" / "bot_f_pool_diagnostics.json"
 LIQUIDITY_CATEGORIES = ("below_minimum", "missing", "invalid", "zero", "passed")
 GECKO_NETWORK_IDS = {"avalanche": "avax"}
@@ -51,6 +54,38 @@ def _retry_after_seconds(response):
             return max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())
         except (TypeError, ValueError, OverflowError):
             return None
+
+
+def _prune_api_metrics(now=None):
+    """Bound telemetry by age, line count and bytes before a new scan."""
+    path = API_METRICS_PATH
+    if not path.exists():
+        return 0
+    now = now or datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=max(1, int(API_METRICS_RETENTION_DAYS)))
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        log.warning("Bot F: não foi possível ler telemetria para retenção: %s", path)
+        return 0
+    retained = []
+    for line in lines:
+        try:
+            record = json.loads(line)
+            timestamp = _created_at(record.get("timestamp_utc")) if isinstance(record, dict) else None
+        except (ValueError, TypeError):
+            continue
+        if timestamp is not None and timestamp >= cutoff:
+            retained.append(line)
+    retained = retained[-max(1, int(API_METRICS_MAX_LINES)):]
+    max_bytes = max(256, int(API_METRICS_MAX_BYTES))
+    while retained and sum(len(line.encode("utf-8")) + 1 for line in retained) > max_bytes:
+        retained.pop(0)
+    content = "".join(line + "\\n" for line in retained)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(content, encoding="utf-8")
+    temporary.replace(path)
+    return len(lines) - len(retained)
 
 
 def _record_api_metric(url, status, attempt, retry_after=None, wait_seconds=0,
@@ -542,6 +577,7 @@ def _build_launch_alert(network, chain_id, token, pool, now, assessment,
         "pool_url": _pool_url(network, pool),
         "pool_id": pool.get("pool_id"),
         "pool_address": pool.get("pool_address"),
+        "dex": pool.get("dex"),
         "token_address": token["address"],
         "network": network,
         "chain_id": chain_id,
@@ -556,6 +592,7 @@ def _build_launch_alert(network, chain_id, token, pool, now, assessment,
 def scan_new_launches(cfg):
     """Discover basic-market-qualified pools and separately report security outcomes."""
     env = cfg["_env"]
+    _prune_api_metrics()
     if not env.get("goplus_enabled"):
         raise RuntimeError("Bot F bloqueado: GOPLUS_ENABLED não está habilitado.")
     settings = cfg["launches"]
@@ -597,6 +634,7 @@ def scan_new_launches(cfg):
         "security_limit_skipped": 0,
         "pending_discovery_alerts": 0,
         "approved_alerts": 0,
+        "unsupported_adapter_skipped": 0,
     }
 
     if bool(env.get("goplus_app_key")) != bool(env.get("goplus_app_secret")):
@@ -666,6 +704,18 @@ def scan_new_launches(cfg):
                 "market_filter_reason": None,
             }
             pool_diagnostic_records.append(pool_record)
+            allowed_dexes = {
+                str(value).strip().casefold()
+                for value in settings.get("alert_eligible_dexes", ["Pancakeswap V2 (BSC)"])
+            }
+            if network != "bsc" or dex_name.strip().casefold() not in allowed_dexes:
+                pool_record["market_filter_result"] = "unsupported_adapter"
+                pool_record["market_filter_reason"] = (
+                    "sem adaptador on-chain habilitado para esta rede/DEX; "
+                    "candidato mantido fora da deduplicação permanente"
+                )
+                diagnostics["unsupported_adapter_skipped"] += 1
+                continue
             token = _select_token(pool, settings["quote_symbols"])
             if not token:
                 diagnostics["invalid_token_or_address"] += 1
