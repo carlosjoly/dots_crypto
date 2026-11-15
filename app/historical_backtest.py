@@ -223,11 +223,20 @@ def signal_direction(alert):
         "possível rompimento de suporte": -1,
         "configuração potencial de alta": 1,
         "configuração potencial de baixa": -1,
+        # Early warnings are directional research events, not confirmed trades.
+        "atenção: recuperação inicial do momentum": 1,
+        "atenção: perda inicial do momentum": -1,
+        "atenção: possível perda da tendência de alta": -1,
     }
     try:
         return directions[signal]
     except KeyError as exc:
         raise ValueError(f"Unrecognized signal direction; refusing to guess: {signal!r}") from exc
+
+
+def is_preliminary_warning(alert):
+    """True for informational early warnings that must not become portfolio trades."""
+    return str(alert.get("signal", "")).strip().casefold().startswith("atenção:")
 
 
 def net_event_return(entry_price, exit_price, direction, fee_per_side_pct=0.10,
