@@ -28,6 +28,7 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Restore Bot F discovery state
+        id: restore-state
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -36,6 +37,23 @@ jobs:
           key: bot-f-state-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
             bot-f-state-${{ runner.os }}-${{ github.ref_name }}-
+      # One-time migration: preserve state from the two legacy cache namespaces.
+      - name: Restore legacy Bot F deduplication state
+        if: steps.restore-state.outputs.cache-matched-key == ''
+        uses: actions/cache/restore@v4
+        with:
+          path: data/bot_f_seen.json
+          key: bot-f-seen-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            bot-f-seen-${{ runner.os }}-${{ github.ref_name }}-
+      - name: Restore legacy Bot F review state
+        if: steps.restore-state.outputs.cache-matched-key == ''
+        uses: actions/cache/restore@v4
+        with:
+          path: data/bot_f_review_state.json
+          key: bot-f-review-state-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            bot-f-review-state-${{ runner.os }}-${{ github.ref_name }}-
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Run Bot F discovery cycle
