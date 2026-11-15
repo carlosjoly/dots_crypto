@@ -20,6 +20,16 @@ class HistoricalEventStudyTests(unittest.TestCase):
         self.assertEqual(signal_direction({"signal": "possível perda de força após sobrecompra"}), -1)
         self.assertEqual(signal_direction({"signal": "configuração potencial de alta"}), 1)
 
+    def test_preliminary_bot_c_and_bot_e_warnings_have_research_directions(self):
+        self.assertEqual(signal_direction({"signal": "atenção: recuperação inicial do momentum"}), 1)
+        self.assertEqual(signal_direction({"signal": "atenção: perda inicial do momentum"}), -1)
+        self.assertEqual(signal_direction({"signal": "atenção: possível perda da tendência de alta"}), -1)
+
+    def test_preliminary_warnings_are_marked_non_tradeable(self):
+        from app.historical_backtest import is_preliminary_warning
+        self.assertTrue(is_preliminary_warning({"signal": "atenção: perda inicial do momentum"}))
+        self.assertFalse(is_preliminary_warning({"signal": "configuração potencial de baixa"}))
+
     def test_chronological_splits_are_ordered(self):
         self.assertEqual(_split_for_index(10, 100)[0], "train")
         self.assertEqual(_split_for_index(65, 100)[0], "validation")
