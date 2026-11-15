@@ -29,6 +29,9 @@ thresholds:
   swing_pullback_short_rsi_min: 35
   swing_pullback_short_rsi_max: 55
   swing_pullback_relative_volume: 1.2
+  # Experimental early warning; requires multiple independent signs of weakening.
+  regime_warning_rsi_max: 48
+  regime_warning_relative_volume: 1.0
 
 alerts:
   telegram_enabled: true
