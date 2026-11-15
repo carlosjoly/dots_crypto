@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime, timezone
 import pandas as pd
-from app.agents import diagnose_market_agents, run_market_agents_enriched
+from app.agents import diagnose_market_agents, run_market_agents_enriched, trend_slope_aligned
 
 CFG = {"thresholds": {
     "move_15m_pct": 1.8, "move_1h_pct": 3.5, "move_4h_pct": 6.0,
@@ -21,7 +21,8 @@ def frame():
         rows.append({"open":100.0,"high":101.0,"low":99.0,"close":100.0,
             "volume":100.0,"close_time":datetime(2026,11,5,tzinfo=timezone.utc),
             "change_pct":0.0,"rel_volume":1.0,"rsi14":50.0,"atr14":2.0,
-            "sma20":100.0,"sma50":98.0})
+            "sma20":100.0,"sma50":98.0,"sma20_slope_3_pct":0.0,
+            "sma50_slope_5_pct":0.0})
     return pd.DataFrame(rows)
 
 class MarketRegimeTests(unittest.TestCase):
@@ -65,9 +66,23 @@ class MarketRegimeTests(unittest.TestCase):
         by_name={x["agent"]:x for x in rows}
         self.assertEqual(by_name["Bot A — Altas expressivas"]["decision"],"criteria_not_met")
         self.assertIn("bullish_breakout",by_name["Bot D — Rompimentos"]["criteria"])
+        self.assertIn("short_slope_positive",by_name["Bot D — Rompimentos"]["criteria"]["bullish_breakout"])
+        self.assertIn("trend_slopes_aligned",by_name["Bot E — Swing trade"]["criteria"]["bullish_pullback_reclaim"])
         self.assertIn("bearish_breakdown",by_name["Bot D — Rompimentos"]["criteria"])
         self.assertFalse(by_name["Bot D — Rompimentos"]["criteria"]["bullish_breakout"]["crossed_resistance"])
         self.assertIn("previous_bullish_structure",by_name["Bot E — Mudança de regime"]["criteria"])
+
+    def test_directional_trend_filter_requires_both_averages_to_slope_correctly(self):
+        rising = {"sma20_slope_3_pct": 0.15, "sma50_slope_5_pct": 0.08}
+        falling = {"sma20_slope_3_pct": -0.15, "sma50_slope_5_pct": -0.08}
+        mixed = {"sma20_slope_3_pct": 0.15, "sma50_slope_5_pct": -0.08}
+        self.assertTrue(trend_slope_aligned(rising, 1))
+        self.assertTrue(trend_slope_aligned(falling, -1))
+        self.assertFalse(trend_slope_aligned(mixed, 1))
+        self.assertFalse(trend_slope_aligned(mixed, -1))
+        self.assertFalse(trend_slope_aligned({"sma20_slope_3_pct": 0.0, "sma50_slope_5_pct": 0.1}, 1))
+        with self.assertRaises(ValueError):
+            trend_slope_aligned(rising, 0)
 
     def test_diagnostics_mark_insufficient_history(self):
         rows=diagnose_market_agents("BTCUSDT","15m",frame().iloc[:40],CFG,[])
