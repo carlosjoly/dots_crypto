@@ -64,24 +64,18 @@ jobs:
             data/bot_f_seen.json
             data/bot_f_review_state.json
           key: bot-f-state-${{ runner.os }}-${{ github.ref_name }}-canary-${{ github.run_id }}
-          restore-keys: |
-            bot-f-state-${{ runner.os }}-${{ github.ref_name }}-
       - name: Restore legacy seen cache
         if: steps.restore-state.outputs.cache-matched-key == ''
         uses: actions/cache/restore@v4
         with:
           path: data/bot_f_seen.json
           key: bot-f-seen-${{ runner.os }}-${{ github.ref_name }}-canary-${{ github.run_id }}
-          restore-keys: |
-            bot-f-seen-${{ runner.os }}-${{ github.ref_name }}-
       - name: Restore legacy review cache
         if: steps.restore-state.outputs.cache-matched-key == ''
         uses: actions/cache/restore@v4
         with:
           path: data/bot_f_review_state.json
           key: bot-f-review-state-${{ runner.os }}-${{ github.ref_name }}-canary-${{ github.run_id }}
-          restore-keys: |
-            bot-f-review-state-${{ runner.os }}-${{ github.ref_name }}-
       - name: Assert migrated data uses production schemas
         run: |
           python - <<'PY'
@@ -107,8 +101,8 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - name: Install dependencies and pytest
+        run: pip install -r requirements.txt pytest
       - name: Compile Bot F read-only modules
         run: python -m py_compile app/run_bot_f.py app/new_launches.py app/alerts.py app/uncx_bsc_lock.py
       - name: Test Bot F runner, retention and mocked Telegram delivery
