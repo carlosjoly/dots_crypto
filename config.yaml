@@ -13,6 +13,7 @@ thresholds:
   move_4h_pct: 6.0
   relative_volume: 1.8
   reversal_relative_volume: 1.5
+  reversal_momentum_relative_volume: 1.2
   breakout_relative_volume: 2.0
   breakout_lookback: 20
   breakout_buffer_atr: 0.10
