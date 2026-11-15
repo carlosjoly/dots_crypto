@@ -30,6 +30,10 @@ def enrich(df):
     out = df.copy()
     out["sma20"] = out["close"].rolling(20).mean()
     out["sma50"] = out["close"].rolling(50).mean()
+    # Point-in-time trend direction: both averages must be rising/falling,
+    # not merely ordered correctly on the current candle.
+    out["sma20_slope_3_pct"] = (out["sma20"] / out["sma20"].shift(3) - 1.0) * 100.0
+    out["sma50_slope_5_pct"] = (out["sma50"] / out["sma50"].shift(5) - 1.0) * 100.0
     out["rsi14"] = rsi(out["close"])
     out["atr14"] = atr(out)
     out["vol_avg20"] = out["volume"].rolling(20).mean()
