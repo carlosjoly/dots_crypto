@@ -55,7 +55,7 @@ jobs:
         env:
           BOT_F_RPC_URL_BSC: ${{ secrets.BOT_F_RPC_URL_BSC }}
           POOL_ADDRESS: ${{ github.event.inputs.pool_address || '0x0055731579f3ee9be56ae6077c01256716c53692' }}
-          LOOKBACK_BLOCKS: ${{ github.event.inputs.lookback_blocks || '4000000' }}
+          LOOKBACK_BLOCKS: ${{ github.event.inputs.lookback_blocks || '15000000' }}
         run: |
           python -m app.verify_uncx_live --pool-address "$POOL_ADDRESS" --lookback-blocks "$LOOKBACK_BLOCKS"
       - name: Upload live verification evidence
