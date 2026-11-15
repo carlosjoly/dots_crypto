@@ -55,6 +55,34 @@ def run_market_agents_enriched(symbol, tf, d, cfg):
             and float(rv) >= reversal_volume):
         out.append(_alert("Bot C — Reversões", symbol, tf, r, "possível perda de força após sobrecompra",
                           "RSI cruzou abaixo da sobrecompra e o preço confirmou a mínima anterior com volume relativo suficiente; ainda é sinal experimental."))
+    # Earlier momentum-shift warnings complement the stricter extreme-RSI
+    # reversal confirmations above. They are informational and require a
+    # midline RSI cross, price/SMA20 agreement, candle direction and volume.
+    momentum_reversal_volume = float(t.get("reversal_momentum_relative_volume", 1.2))
+    bullish_momentum_shift = (
+        float(prev["rsi14"]) <= 50 < float(r["rsi14"])
+        and float(r["close"]) > float(r["sma20"])
+        and float(r["close"]) > float(r["open"])
+        and float(rv) >= momentum_reversal_volume
+    )
+    bearish_momentum_shift = (
+        float(prev["rsi14"]) >= 50 > float(r["rsi14"])
+        and float(r["close"]) < float(r["sma20"])
+        and float(r["close"]) < float(r["open"])
+        and float(rv) >= momentum_reversal_volume
+    )
+    if bullish_momentum_shift:
+        out.append(_alert(
+            "Bot C — Reversões", symbol, tf, r,
+            "atenção: recuperação inicial do momentum",
+            f"RSI cruzou acima de 50, preço fechou acima da SMA20 com candle comprador e volume relativo {float(rv):.2f}x. Recuperação ainda não confirmada como reversão de tendência.",
+        ))
+    elif bearish_momentum_shift:
+        out.append(_alert(
+            "Bot C — Reversões", symbol, tf, r,
+            "atenção: perda inicial do momentum",
+            f"RSI cruzou abaixo de 50, preço fechou abaixo da SMA20 com candle vendedor e volume relativo {float(rv):.2f}x. Enfraquecimento ainda não confirma tendência de baixa.",
+        ))
     lookback = int(t["breakout_lookback"])
     prior = d.iloc[-lookback-1:-1]
     # Emit a breakout only on the crossing candle, not on every candle that
@@ -253,6 +281,8 @@ def diagnose_market_agents(symbol, tf, df, cfg, alerts=None):
             "bearish_rsi_cross": prev["rsi14"] >= float(t["rsi_overbought"]) and rsi < float(t["rsi_overbought"]),
             "bearish_price_break": r["close"] < prev["low"] and r["close"] < r["open"],
             "reversal_volume_met": rv >= float(t.get("reversal_relative_volume", 1.5)),
+            "bullish_midline_shift": prev["rsi14"] <= 50 < rsi and r["close"] > r["sma20"] and r["close"] > r["open"] and rv >= float(t.get("reversal_momentum_relative_volume", 1.2)),
+            "bearish_midline_shift": prev["rsi14"] >= 50 > rsi and r["close"] < r["sma20"] and r["close"] < r["open"] and rv >= float(t.get("reversal_momentum_relative_volume", 1.2)),
         }),
         record("Bot D — Rompimentos", {
             "crossed_resistance": bool(crossed_resistance), "crossed_support": bool(crossed_support),
