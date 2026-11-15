@@ -43,9 +43,18 @@ def main():
                 alert.get("pool_id", alert.get("symbol", "N/D")),
             )
             continue
-        if alert.get("network") != "bsc" or str(alert.get("chain_id")) != "56":
-            log.warning("Bot F Telegram bloqueado: sem adaptador de lock on-chain aprovado para %s/%s.",
-                        alert.get("network", "N/D"), alert.get("pool_id", alert.get("symbol", "N/D")))
+        if (
+            alert.get("network") != "bsc"
+            or str(alert.get("chain_id")) != "56"
+            or str(alert.get("dex") or "").strip().casefold() != "pancakeswap v2 (bsc)"
+        ):
+            release_seen_token(cfg, alert)
+            log.warning(
+                "Bot F Telegram bloqueado e candidato liberado da deduplicação: "
+                "adaptador restrito a BSC/PancakeSwap V2; rede=%s; DEX=%s; pool=%s.",
+                alert.get("network", "N/D"), alert.get("dex", "N/D"),
+                alert.get("pool_id", alert.get("symbol", "N/D")),
+            )
             continue
         rpc_url = os.getenv("BOT_F_RPC_URL_BSC", "").strip()
         if not rpc_url.startswith(("https://", "http://")):
