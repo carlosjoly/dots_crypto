@@ -5,7 +5,7 @@ from pathlib import Path
 
 from .config import load_config
 from .market_data import get_klines, get_24h_tickers, get_book_ticker_details
-from .agents import run_market_agents, disabled_agent_status
+from .agents import run_market_agents, diagnose_market_agents, disabled_agent_status
 from .new_launches import scan_new_launches, release_seen_token
 from .bot_g import run_bot_g_observer
 from .alerts import emit_alert
@@ -22,7 +22,7 @@ def _append_jsonl(path, record):
         handle.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
 
 
-def process_active_market_agents(cfg, base, candidates, cooldown_store=None):
+def process_active_market_agents(cfg, base, candidates, cooldown_store=None, diagnostics_path=None):
     """Run Bots A-E; continue after isolated errors but report an incomplete cycle."""
     sent = 0
     failures = []
@@ -31,6 +31,11 @@ def process_active_market_agents(cfg, base, candidates, cooldown_store=None):
             try:
                 candles = get_klines(base, symbol, tf, int(cfg["exchange"]["candle_limit"]))
                 alerts = run_market_agents(symbol, tf, candles, cfg)
+                if diagnostics_path is not None:
+                    collected_at = datetime.now(timezone.utc).isoformat()
+                    for decision in diagnose_market_agents(symbol, tf, candles, cfg, alerts):
+                        decision["collected_at_utc"] = collected_at
+                        _append_jsonl(diagnostics_path, decision)
                 for alert in alerts:
                     alert["spread_pct"] = market_snapshot["spread_pct"]
                     alert["best_bid"] = market_snapshot["bid"]
@@ -57,6 +62,7 @@ def main():
     setup_logging(cfg["_root"])
     base = cfg["exchange"]["base_url"]
     diagnostics_path = Path(cfg["_root"]) / "data" / "market_filter_audit.jsonl"
+    agent_diagnostics_path = Path(cfg["_root"]) / "data" / "agent_decision_audit.jsonl"
     cycle_failures = []
     try:
         tickers = get_24h_tickers(base)
@@ -119,7 +125,7 @@ def main():
     cooldown_store = CooldownStore(
         Path(cfg["_root"]) / "data" / "alert_cooldown.json", cooldown_minutes
     )
-    sent, market_failures = process_active_market_agents(cfg, base, candidates, cooldown_store)
+    sent, market_failures = process_active_market_agents(cfg, base, candidates, cooldown_store, agent_diagnostics_path)
     cycle_failures.extend(
         {"stage": "active_agent_cycle", **failure} for failure in market_failures
     )
