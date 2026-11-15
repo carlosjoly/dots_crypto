@@ -35,6 +35,15 @@ alerts:
   cooldown_minutes: 60
   log_file: "data/alerts.jsonl"
 
+
+trend_monitor:
+  enabled: true
+  # Confirm regime transitions on two distinct, fully closed candles.
+  confirmations: 2
+  # Minimum percentage slope for both SMA20 and SMA50.
+  slope_floor_pct: 0.02
+  state_file: "data/trend_monitor_state.json"
+
 launches:
   enabled: true
   provider: "GeckoTerminal"
