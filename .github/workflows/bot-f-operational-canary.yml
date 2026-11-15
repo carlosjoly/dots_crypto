@@ -2,8 +2,7 @@ name: Bot F operational canary (isolated)
 
 on:
   push:
-    branches:
-      - fix/bot-f-bsc-v2-gates-telemetry
+    branches: [fix/bot-f-bsc-v2-gates-telemetry]
     paths:
       - ".github/workflows/bot-f-operational-canary.yml"
       - "app/run_bot_f.py"
@@ -13,8 +12,7 @@ on:
       - "tests/test_bot_f_hardening.py"
       - "tests/test_telegram_delivery.py"
   pull_request:
-    branches:
-      - main
+    branches: [main]
     paths:
       - ".github/workflows/bot-f-operational-canary.yml"
       - "app/run_bot_f.py"
@@ -35,12 +33,11 @@ jobs:
   seed-legacy-cache-fixtures:
     runs-on: ubuntu-latest
     steps:
-      - name: Create isolated legacy cache fixtures
-        shell: bash
+      - name: Create valid legacy state fixtures (production JSON schemas)
         run: |
           mkdir -p data
-          printf '%s\n' '{"tokens":["0x1111111111111111111111111111111111111111"]}' > data/bot_f_seen.json
-          printf '%s\n' '{"0x2222222222222222222222222222222222222222":{"status":"review","last_checked":"2026-11-15T00:00:00Z"}}' > data/bot_f_review_state.json
+          printf '%s\n' '["56:0x1111111111111111111111111111111111111111"]' > data/bot_f_seen.json
+          printf '%s\n' '{"56:0x2222222222222222222222222222222222222222":{"checked_at":"2026-11-15T00:00:00Z","status":"review","flags":["fixture"],"discovery_alert_sent":false}}' > data/bot_f_review_state.json
       - name: Save legacy seen cache fixture
         uses: actions/cache/save@v4
         with:
@@ -56,11 +53,10 @@ jobs:
     needs: seed-legacy-cache-fixtures
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Restore consolidated cache (expected miss on first canary cycle)
+      - name: Restore consolidated cache (expected miss on first cycle)
         id: restore-state
         uses: actions/cache/restore@v4
         with:
@@ -86,19 +82,20 @@ jobs:
           key: bot-f-review-state-${{ runner.os }}-${{ github.ref_name }}-canary-${{ github.run_id }}
           restore-keys: |
             bot-f-review-state-${{ runner.os }}-${{ github.ref_name }}-
-      - name: Assert legacy state survived migration
-        shell: bash
+      - name: Assert migrated data uses production schemas
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
           seen = json.loads(Path("data/bot_f_seen.json").read_text())
           review = json.loads(Path("data/bot_f_review_state.json").read_text())
-          assert "0x1111111111111111111111111111111111111111" in seen["tokens"], seen
-          assert review["0x2222222222222222222222222222222222222222"]["status"] == "review", review
-          print("PASS: legacy seen and review state restored without loss")
+          assert isinstance(seen, list) and "56:0x1111111111111111111111111111111111111111" in seen, seen
+          record = review["56:0x2222222222222222222222222222222222222222"]
+          assert record["status"] == "review" and record["discovery_alert_sent"] is False, record
+          assert "checked_at" in record, record
+          print("PASS: both legacy states restored in Bot F production JSON formats")
           PY
-      - name: Save consolidated state cache
+      - name: Save consolidated cache
         uses: actions/cache/save@v4
         with:
           path: |
@@ -128,25 +125,24 @@ jobs:
     needs: migrate-and-test
     runs-on: ubuntu-latest
     steps:
-      - name: Restore consolidated state as next scheduled cycle would
+      - name: Restore consolidated state on simulated next cycle
         uses: actions/cache/restore@v4
         with:
           path: |
             data/bot_f_seen.json
             data/bot_f_review_state.json
           key: bot-f-state-${{ runner.os }}-${{ github.ref_name }}-canary-${{ github.run_id }}
-      - name: Assert second-cycle persistence and deduplication state
-        shell: bash
+      - name: Assert persistence and deduplication identity
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
           seen = json.loads(Path("data/bot_f_seen.json").read_text())
           review = json.loads(Path("data/bot_f_review_state.json").read_text())
-          assert "0x1111111111111111111111111111111111111111" in seen["tokens"], seen
-          assert review["0x2222222222222222222222222222222222222222"]["status"] == "review", review
-          print("PASS: consolidated seen/review state restored on simulated next cycle")
+          assert "56:0x1111111111111111111111111111111111111111" in seen, seen
+          assert review["56:0x2222222222222222222222222222222222222222"]["status"] == "review", review
+          print("PASS: consolidated seen/review state restored on next cycle")
           PY
 
-# Safety: this canary uses synthetic cache fixtures and mocked Telegram HTTP tests only.
-# It never runs app.run_bot_f, never reads production secrets, and never sends Telegram messages.
+# Isolated synthetic caches only. Never invokes app.run_bot_f, reads production secrets,
+# contacts RPC/GeckoTerminal/GoPlus, or sends Telegram messages.
