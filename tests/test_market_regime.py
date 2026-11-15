@@ -2,6 +2,7 @@ import unittest
 from datetime import datetime, timezone
 import pandas as pd
 from app.agents import diagnose_market_agents, run_market_agents_enriched, trend_slope_aligned
+from app.indicators import enrich
 
 CFG = {"thresholds": {
     "move_15m_pct": 1.8, "move_1h_pct": 3.5, "move_4h_pct": 6.0,
@@ -71,6 +72,19 @@ class MarketRegimeTests(unittest.TestCase):
         self.assertIn("bearish_breakdown",by_name["Bot D — Rompimentos"]["criteria"])
         self.assertFalse(by_name["Bot D — Rompimentos"]["criteria"]["bullish_breakout"]["crossed_resistance"])
         self.assertIn("previous_bullish_structure",by_name["Bot E — Mudança de regime"]["criteria"])
+
+    def test_enrichment_calculates_directional_average_slopes(self):
+        rising_close = pd.Series(range(100, 180), dtype=float)
+        falling_close = rising_close.iloc[::-1].reset_index(drop=True)
+        def candles(close):
+            return pd.DataFrame({"close": close, "high": close + 1,
+                                 "low": close - 1, "volume": 100.0})
+        rising = enrich(candles(rising_close)).iloc[-1]
+        falling = enrich(candles(falling_close)).iloc[-1]
+        self.assertGreater(rising["sma20_slope_3_pct"], 0)
+        self.assertGreater(rising["sma50_slope_5_pct"], 0)
+        self.assertLess(falling["sma20_slope_3_pct"], 0)
+        self.assertLess(falling["sma50_slope_5_pct"], 0)
 
     def test_directional_trend_filter_requires_both_averages_to_slope_correctly(self):
         rising = {"sma20_slope_3_pct": 0.15, "sma50_slope_5_pct": 0.08}
