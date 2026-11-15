@@ -2,7 +2,7 @@
 
 ## Result
 
-<badge>VALIDATED — READ-ONLY</badge>
+**Status: VALIDATED — READ-ONLY**
 
 The live workflow run [#43713326021](https://github.com/carlosjoly/dots_crypto/actions/runs/43713326021) completed successfully. Its artifact is [bot-f-uncx-live-validation-43713326021](https://github.com/carlosjoly/dots_crypto/actions/runs/43713326021/artifacts/14160878133).
 
