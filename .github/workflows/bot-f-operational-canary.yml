@@ -12,6 +12,17 @@ on:
       - "tests/test_bot_f_runner.py"
       - "tests/test_bot_f_hardening.py"
       - "tests/test_telegram_delivery.py"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/bot-f-operational-canary.yml"
+      - "app/run_bot_f.py"
+      - "app/new_launches.py"
+      - "app/alerts.py"
+      - "tests/test_bot_f_runner.py"
+      - "tests/test_bot_f_hardening.py"
+      - "tests/test_telegram_delivery.py"
 
 permissions:
   contents: read
@@ -118,7 +129,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Restore consolidated state as next scheduled cycle would
-        id: restore-next
         uses: actions/cache/restore@v4
         with:
           path: |
