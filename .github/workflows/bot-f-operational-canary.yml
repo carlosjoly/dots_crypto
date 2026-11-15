@@ -30,6 +30,61 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  inspect-default-branch-cache:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read consolidated Bot F cache from default branch (no write)
+        id: current
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/bot_f_seen.json
+            data/bot_f_review_state.json
+          key: bot-f-state-${{ runner.os }}-main-readonly-probe-${{ github.run_id }}
+          restore-keys: |
+            bot-f-state-${{ runner.os }}-main-
+      - name: Read legacy seen cache from default branch (fallback only)
+        id: legacy-seen
+        if: steps.current.outputs.cache-matched-key == ''
+        uses: actions/cache/restore@v4
+        with:
+          path: data/bot_f_seen.json
+          key: bot-f-seen-${{ runner.os }}-main-readonly-probe-${{ github.run_id }}
+          restore-keys: |
+            bot-f-seen-${{ runner.os }}-main-
+      - name: Read legacy review cache from default branch (fallback only)
+        id: legacy-review
+        if: steps.current.outputs.cache-matched-key == ''
+        uses: actions/cache/restore@v4
+        with:
+          path: data/bot_f_review_state.json
+          key: bot-f-review-state-${{ runner.os }}-main-readonly-probe-${{ github.run_id }}
+          restore-keys: |
+            bot-f-review-state-${{ runner.os }}-main-
+      - name: Validate production cache formats without exposing addresses
+        env:
+          CURRENT_KEY: ${{ steps.current.outputs.cache-matched-key }}
+          SEEN_KEY: ${{ steps.legacy-seen.outputs.cache-matched-key }}
+          REVIEW_KEY: ${{ steps.legacy-review.outputs.cache-matched-key }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          seen_path = Path("data/bot_f_seen.json")
+          review_path = Path("data/bot_f_review_state.json")
+          seen = json.loads(seen_path.read_text()) if seen_path.exists() else []
+          review = json.loads(review_path.read_text()) if review_path.exists() else {}
+          assert isinstance(seen, list), f"seen cache has unexpected type: {type(seen).__name__}"
+          assert isinstance(review, dict), f"review cache has unexpected type: {type(review).__name__}"
+          print("default_branch_consolidated_cache_hit=" + str(bool(os.getenv("CURRENT_KEY"))).lower())
+          print("default_branch_legacy_seen_cache_hit=" + str(bool(os.getenv("SEEN_KEY"))).lower())
+          print("default_branch_legacy_review_cache_hit=" + str(bool(os.getenv("REVIEW_KEY"))).lower())
+          print(f"seen_entries={len(seen)} review_entries={len(review)}")
+          print(f"seen_bytes={seen_path.stat().st_size if seen_path.exists() else 0}")
+          print(f"review_bytes={review_path.stat().st_size if review_path.exists() else 0}")
+          print("PASS: any restored production cache uses the expected Bot F JSON schema")
+          PY
+
   seed-legacy-cache-fixtures:
     runs-on: ubuntu-latest
     steps:
@@ -138,5 +193,6 @@ jobs:
           print("PASS: consolidated seen/review state restored on next cycle")
           PY
 
-# Isolated synthetic caches only. Never invokes app.run_bot_f, reads production secrets,
+# Isolated synthetic caches only for migration simulation. The default-branch
+# cache job is read-only. Never invokes app.run_bot_f, reads production secrets,
 # contacts RPC/GeckoTerminal/GoPlus, or sends Telegram messages.
