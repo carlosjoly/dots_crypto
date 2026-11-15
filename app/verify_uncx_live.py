@@ -16,7 +16,7 @@ from .uncx_bsc_lock import (
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pool-address", required=True)
-    parser.add_argument("--lookback-blocks", type=int, default=15_000_000)
+    parser.add_argument("--lookback-blocks", type=int, default=50_000)
     args = parser.parse_args()
 
     rpc_url = os.getenv("BOT_F_RPC_URL_BSC", "").strip()
