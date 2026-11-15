@@ -291,7 +291,7 @@ def verify_uncx_bsc_pancakeswap_v2_lock(
 
 def build_bsc_pancakeswap_v2_lp_proof(pool_address, rpc, allowed_factories=None,
                                       expected_locker_code_hash=None, audit_path=None,
-                                      liquidity_usd=None):
+                                      liquidity_usd=None, lookback_blocks=50000):
     """Combine independent pool/reserve proof with the specific UNCX LP lock."""
     snapshot = verify_v2_pool_reserves(
         "bsc", pool_address,
@@ -303,6 +303,7 @@ def build_bsc_pancakeswap_v2_lp_proof(pool_address, rpc, allowed_factories=None,
     lock = verify_uncx_bsc_pancakeswap_v2_lock(
         pool_address, rpc, expected_locker_code_hash, audit_path,
         block_number=snapshot.get("reserve_block_number"),
+        lookback_blocks=lookback_blocks,
     )
     if lock.get("status") != "lock_verified_transaction_linked":
         snapshot["reason"] = lock.get("reason") or "lock UNCX não verificado"
