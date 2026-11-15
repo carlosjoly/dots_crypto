@@ -71,6 +71,8 @@ def process_continuous_trend_monitor(cfg, base, state_store):
                 alert = state_store.observe(symbol, timeframe, snapshot)
                 if alert is not None:
                     emit_alert(cfg, alert)
+                    state_store.acknowledge(symbol, timeframe)
+                    state_store.save()
                     sent += 1
                     log.info("Monitor de tendência: %s %s — %s",
                              symbol, timeframe, alert["signal"])
