@@ -12,6 +12,15 @@ on:
       - app/portfolio_backtest.py
       - app/historical_backtest.py
       - config.yaml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - app/agents.py
+      - app/portfolio_backtest.py
+      - app/historical_backtest.py
+      - config.yaml
+      - .github/workflows/backtest.yml
   workflow_dispatch:
     inputs:
       days:
