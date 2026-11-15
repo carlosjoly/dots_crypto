@@ -32,10 +32,14 @@ def process_active_market_agents(cfg, base, candidates, cooldown_store=None, dia
                 candles = get_klines(base, symbol, tf, int(cfg["exchange"]["candle_limit"]))
                 alerts = run_market_agents(symbol, tf, candles, cfg)
                 if diagnostics_path is not None:
-                    collected_at = datetime.now(timezone.utc).isoformat()
-                    for decision in diagnose_market_agents(symbol, tf, candles, cfg, alerts):
-                        decision["collected_at_utc"] = collected_at
-                        _append_jsonl(diagnostics_path, decision)
+                    try:
+                        collected_at = datetime.now(timezone.utc).isoformat()
+                        for decision in diagnose_market_agents(symbol, tf, candles, cfg, alerts):
+                            decision["collected_at_utc"] = collected_at
+                            _append_jsonl(diagnostics_path, decision)
+                    except Exception:
+                        # Diagnostics must never suppress valid market alerts.
+                        log.exception("Falha ao registrar diagnóstico %s %s; mantendo processamento dos alertas.", symbol, tf)
                 for alert in alerts:
                     alert["spread_pct"] = market_snapshot["spread_pct"]
                     alert["best_bid"] = market_snapshot["bid"]
