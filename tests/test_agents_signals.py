@@ -37,6 +37,8 @@ def frame(**overrides):
             "atr14": 2.0,
             "sma20": 100.0,
             "sma50": 100.0,
+            "sma20_slope_3_pct": 0.0,
+            "sma50_slope_5_pct": 0.0,
         })
     result = pd.DataFrame(rows)
     for key, value in overrides.items():
@@ -86,12 +88,14 @@ class ActiveAgentSignalTests(unittest.TestCase):
                 self.assertIn("Bot A — Altas expressivas", self.agents(data, timeframe))
 
     def test_bot_d_upside_breakout_uses_prior_lookback_and_relative_volume(self):
-        data = frame(change_pct=0.2, rel_volume=2.0, rsi14=60.0, sma20=101.0, sma50=99.0)
+        data = frame(change_pct=0.2, rel_volume=2.0, rsi14=60.0, sma20=101.0, sma50=99.0,
+                     sma20_slope_3_pct=0.15, sma50_slope_5_pct=0.08)
         data.loc[54, ["open", "close"]] = [110.0, 111.0]
         self.assertIn("Bot D — Rompimentos", self.agents(data))
 
     def test_bot_d_downside_breakout_uses_prior_lookback_and_relative_volume(self):
-        data = frame(change_pct=-0.2, rel_volume=2.0, rsi14=40.0, sma20=99.0, sma50=101.0)
+        data = frame(change_pct=-0.2, rel_volume=2.0, rsi14=40.0, sma20=99.0, sma50=101.0,
+                     sma20_slope_3_pct=-0.15, sma50_slope_5_pct=-0.08)
         data.loc[54, ["open", "close"]] = [90.0, 89.0]
         self.assertIn("Bot D — Rompimentos", self.agents(data))
 
@@ -111,7 +115,8 @@ class ActiveAgentSignalTests(unittest.TestCase):
         self.assertNotIn("Bot D — Rompimentos", self.agents(data))
 
     def test_bot_e_uptrend_emits_stop_and_target_from_atr(self):
-        data = frame(sma20=99.0, sma50=98.0, rsi14=50.0, rel_volume=1.2, atr14=2.0)
+        data = frame(sma20=99.0, sma50=98.0, rsi14=50.0, rel_volume=1.2, atr14=2.0,
+                     sma20_slope_3_pct=0.15, sma50_slope_5_pct=0.08)
         data.loc[53, ["close", "high", "low", "sma20", "sma50"]] = [100.0, 99.0, 98.0, 99.0, 98.0]
         data.loc[54, ["open", "close", "high", "low"]] = [99.0, 100.0, 101.0, 98.0]
         alerts = run_market_agents_enriched("BTCUSDT", "4h", data, CFG)
@@ -124,7 +129,8 @@ class ActiveAgentSignalTests(unittest.TestCase):
         self.assertNotIn("Bot E — Swing trade", self.agents(data))
 
     def test_bot_e_downtrend_emits_bearish_setup(self):
-        data = frame(sma20=101.0, sma50=102.0, rsi14=50.0, rel_volume=1.2)
+        data = frame(sma20=101.0, sma50=102.0, rsi14=50.0, rel_volume=1.2,
+                     sma20_slope_3_pct=-0.15, sma50_slope_5_pct=-0.08)
         data.loc[53, ["close", "high", "low", "sma20", "sma50"]] = [100.0, 102.0, 101.0, 102.0, 103.0]
         data.loc[54, ["open", "close", "high", "low"]] = [101.0, 100.0, 102.0, 99.0]
         alerts = run_market_agents_enriched("BTCUSDT", "4h", data, CFG)
@@ -150,7 +156,8 @@ class ActiveAgentSignalTests(unittest.TestCase):
 
     def test_bot_e_long_target_uses_configured_risk_reward(self):
         cfg = {"thresholds": {**CFG["thresholds"], "min_risk_reward": 2.0}}
-        data = frame(sma20=99.0, sma50=98.0, rsi14=50.0, rel_volume=1.2, atr14=2.0)
+        data = frame(sma20=99.0, sma50=98.0, rsi14=50.0, rel_volume=1.2, atr14=2.0,
+                     sma20_slope_3_pct=0.15, sma50_slope_5_pct=0.08)
         data.loc[53, ["close", "high", "low", "sma20", "sma50"]] = [100.0, 99.0, 98.0, 99.0, 98.0]
         data.loc[54, ["open", "close", "high", "low"]] = [99.0, 100.0, 101.0, 98.0]
         alerts = run_market_agents_enriched("BTCUSDT", "4h", data, cfg)
@@ -159,7 +166,8 @@ class ActiveAgentSignalTests(unittest.TestCase):
 
     def test_bot_e_short_target_uses_configured_risk_reward(self):
         cfg = {"thresholds": {**CFG["thresholds"], "min_risk_reward": 2.0}}
-        data = frame(sma20=101.0, sma50=102.0, rsi14=50.0, rel_volume=1.2, atr14=2.0)
+        data = frame(sma20=101.0, sma50=102.0, rsi14=50.0, rel_volume=1.2, atr14=2.0,
+                     sma20_slope_3_pct=-0.15, sma50_slope_5_pct=-0.08)
         data.loc[53, ["close", "high", "low", "sma20", "sma50"]] = [100.0, 102.0, 101.0, 102.0, 103.0]
         data.loc[54, ["open", "close", "high", "low"]] = [101.0, 100.0, 102.0, 99.0]
         alerts = run_market_agents_enriched("BTCUSDT", "4h", data, cfg)

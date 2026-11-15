@@ -13,6 +13,7 @@ def make_frame():
             "volume": 100.0, "close_time": f"2026-01-01T{i:02d}:00:00Z",
             "change_pct": 0.0, "rel_volume": 0.5, "rsi14": 50.0,
             "atr14": 1.0, "sma20": 101.0, "sma50": 102.0,
+            "sma20_slope_3_pct": 0.0, "sma50_slope_5_pct": 0.0,
         })
     return pd.DataFrame(rows)
 
@@ -33,11 +34,11 @@ class EdgeTriggeredSignalTests(unittest.TestCase):
     def test_breakout_is_emitted_only_on_crossing_candle(self):
         frame = make_frame()
         frame.loc[58, ["close", "rel_volume"]] = [100.0, 2.0]
-        frame.loc[59, ["open", "close", "rel_volume", "sma20", "sma50"]] = [100.0, 103.0, 2.0, 100.5, 100.0]
+        frame.loc[59, ["open", "close", "rel_volume", "sma20", "sma50", "sma20_slope_3_pct", "sma50_slope_5_pct"]] = [100.0, 103.0, 2.0, 100.5, 100.0, 0.15, 0.08]
         first = run_market_agents_enriched("BTCUSDT", "15m", frame.iloc[:60], config())
         self.assertEqual(sum(x["agent"] == "Bot D — Rompimentos" for x in first), 1)
 
-        frame.loc[59, ["open", "close", "rel_volume", "sma20", "sma50"]] = [103.0, 104.0, 2.0, 100.5, 100.0]
+        frame.loc[59, ["open", "close", "rel_volume", "sma20", "sma50", "sma20_slope_3_pct", "sma50_slope_5_pct"]] = [103.0, 104.0, 2.0, 100.5, 100.0, 0.15, 0.08]
         frame.loc[58, ["close", "rel_volume"]] = [103.0, 2.0]
         second = run_market_agents_enriched("BTCUSDT", "15m", frame, config())
         self.assertFalse(any(x["agent"] == "Bot D — Rompimentos" for x in second))
@@ -48,8 +49,8 @@ class EdgeTriggeredSignalTests(unittest.TestCase):
         frame.loc[58, ["low", "close", "high", "sma20", "sma50", "rsi14", "rel_volume"]] = [
             106, 108, 109, 105, 100, 50, 1.3
         ]
-        frame.loc[59, ["low", "close", "high", "sma20", "sma50", "rsi14", "rel_volume"]] = [
-            107, 112, 113, 106, 100, 52, 1.3
+        frame.loc[59, ["low", "close", "high", "sma20", "sma50", "rsi14", "rel_volume", "sma20_slope_3_pct", "sma50_slope_5_pct"]] = [
+            107, 112, 113, 106, 100, 52, 1.3, 0.15, 0.08
         ]
         no_pullback = run_market_agents_enriched("BTCUSDT", "15m", frame, config())
         self.assertFalse(any(x["agent"] == "Bot E — Swing trade" for x in no_pullback))
@@ -59,8 +60,8 @@ class EdgeTriggeredSignalTests(unittest.TestCase):
         frame.loc[58, ["low", "close", "high", "sma20", "sma50", "rsi14", "rel_volume"]] = [
             104, 108, 110, 105, 100, 50, 1.0
         ]
-        frame.loc[59, ["low", "close", "high", "sma20", "sma50", "rsi14", "rel_volume"]] = [
-            107, 112, 113, 106, 100, 52, 1.3
+        frame.loc[59, ["low", "close", "high", "sma20", "sma50", "rsi14", "rel_volume", "sma20_slope_3_pct", "sma50_slope_5_pct"]] = [
+            107, 112, 113, 106, 100, 52, 1.3, 0.15, 0.08
         ]
         entered = run_market_agents_enriched("BTCUSDT", "15m", frame, config())
         self.assertEqual(sum(x["agent"] == "Bot E — Swing trade" for x in entered), 1)
@@ -68,8 +69,8 @@ class EdgeTriggeredSignalTests(unittest.TestCase):
         # Once price has reclaimed SMA20, the setup is not emitted again
         # unless a fresh pullback and reclaim happen.
         frame.loc[60] = frame.loc[59]
-        frame.loc[60, ["low", "close", "high", "sma20", "sma50", "rsi14", "rel_volume"]] = [
-            111, 114, 115, 107, 100, 53, 1.3
+        frame.loc[60, ["low", "close", "high", "sma20", "sma50", "rsi14", "rel_volume", "sma20_slope_3_pct", "sma50_slope_5_pct"]] = [
+            111, 114, 115, 107, 100, 53, 1.3, 0.15, 0.08
         ]
         repeated = run_market_agents_enriched("BTCUSDT", "15m", frame.iloc[1:], config())
         self.assertFalse(any(x["agent"] == "Bot E — Swing trade" for x in repeated))
@@ -81,8 +82,8 @@ class EdgeTriggeredSignalTests(unittest.TestCase):
         frame.loc[58, ["high", "low", "close", "sma20", "sma50", "rsi14", "rel_volume"]] = [
             94, 90, 92, 95, 100, 50, 1.0
         ]
-        frame.loc[59, ["high", "low", "close", "sma20", "sma50", "rsi14", "rel_volume"]] = [
-            90, 87, 88, 94, 100, 48, 1.3
+        frame.loc[59, ["high", "low", "close", "sma20", "sma50", "rsi14", "rel_volume", "sma20_slope_3_pct", "sma50_slope_5_pct"]] = [
+            90, 87, 88, 94, 100, 48, 1.3, -0.15, -0.08
         ]
         no_retest = run_market_agents_enriched("BTCUSDT", "15m", frame, config())
         self.assertFalse(any(
@@ -102,11 +103,11 @@ class EdgeTriggeredSignalTests(unittest.TestCase):
     def test_1h_and_4h_swing_requires_pullback_and_confirmed_reclaim(self):
         for timeframe in ("1h", "4h"):
             frame = make_frame()
-            frame.loc[58, ["low", "close", "high", "sma20", "sma50", "rsi14", "rel_volume"]] = [
-                104, 108, 109, 105, 100, 50, 1.0
+            frame.loc[58, ["low", "close", "high", "sma20", "sma50", "rsi14", "rel_volume", "sma20_slope_3_pct", "sma50_slope_5_pct"]] = [
+                104, 108, 109, 105, 100, 50, 1.0, 0.15, 0.08
             ]
-            frame.loc[59, ["low", "close", "high", "sma20", "sma50", "rsi14", "rel_volume"]] = [
-                107, 112, 113, 106, 100, 52, 1.3
+            frame.loc[59, ["low", "close", "high", "sma20", "sma50", "rsi14", "rel_volume", "sma20_slope_3_pct", "sma50_slope_5_pct"]] = [
+                107, 112, 113, 106, 100, 52, 1.3, 0.15, 0.08
             ]
             alerts = run_market_agents_enriched("BTCUSDT", timeframe, frame, config())
             with self.subTest(timeframe=timeframe):
