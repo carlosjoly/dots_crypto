@@ -64,7 +64,9 @@ class MarketRegimeTests(unittest.TestCase):
         self.assertEqual(len(rows),6)
         by_name={x["agent"]:x for x in rows}
         self.assertEqual(by_name["Bot A — Altas expressivas"]["decision"],"criteria_not_met")
-        self.assertIn("relative_volume_met",by_name["Bot D — Rompimentos"]["criteria"])
+        self.assertIn("bullish_breakout",by_name["Bot D — Rompimentos"]["criteria"])
+        self.assertIn("bearish_breakdown",by_name["Bot D — Rompimentos"]["criteria"])
+        self.assertFalse(by_name["Bot D — Rompimentos"]["criteria"]["bullish_breakout"]["crossed_resistance"])
         self.assertIn("previous_bullish_structure",by_name["Bot E — Mudança de regime"]["criteria"])
 
     def test_diagnostics_mark_insufficient_history(self):
