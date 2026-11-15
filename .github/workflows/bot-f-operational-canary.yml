@@ -1,0 +1,292 @@
+name: Bot F operational canary (isolated)
+
+on:
+  push:
+    branches: [fix/bot-f-bsc-v2-gates-telemetry]
+    paths:
+      - ".github/workflows/bot-f-operational-canary.yml"
+      - "app/run_bot_f.py"
+      - "app/new_launches.py"
+      - "app/alerts.py"
+      - "tests/test_bot_f_runner.py"
+      - "tests/test_bot_f_hardening.py"
+      - "tests/test_telegram_delivery.py"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/bot-f-operational-canary.yml"
+      - "app/run_bot_f.py"
+      - "app/new_launches.py"
+      - "app/alerts.py"
+      - "tests/test_bot_f_runner.py"
+      - "tests/test_bot_f_hardening.py"
+      - "tests/test_telegram_delivery.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bot-f-operational-canary
+  cancel-in-progress: false
+
+jobs:
+  inspect-default-branch-cache:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read consolidated Bot F cache from default branch (no write)
+        id: current
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/bot_f_seen.json
+            data/bot_f_review_state.json
+          key: bot-f-state-${{ runner.os }}-main-readonly-probe-${{ github.run_id }}
+          restore-keys: |
+            bot-f-state-${{ runner.os }}-main-
+      - name: Read legacy seen cache from default branch (fallback only)
+        id: legacy-seen
+        if: steps.current.outputs.cache-matched-key == ''
+        uses: actions/cache/restore@v4
+        with:
+          path: data/bot_f_seen.json
+          key: bot-f-seen-${{ runner.os }}-main-readonly-probe-${{ github.run_id }}
+          restore-keys: |
+            bot-f-seen-${{ runner.os }}-main-
+      - name: Read legacy review cache from default branch (fallback only)
+        id: legacy-review
+        if: steps.current.outputs.cache-matched-key == ''
+        uses: actions/cache/restore@v4
+        with:
+          path: data/bot_f_review_state.json
+          key: bot-f-review-state-${{ runner.os }}-main-readonly-probe-${{ github.run_id }}
+          restore-keys: |
+            bot-f-review-state-${{ runner.os }}-main-
+      - name: Validate production cache formats without exposing addresses
+        env:
+          CURRENT_KEY: ${{ steps.current.outputs.cache-matched-key }}
+          SEEN_KEY: ${{ steps.legacy-seen.outputs.cache-matched-key }}
+          REVIEW_KEY: ${{ steps.legacy-review.outputs.cache-matched-key }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          seen_path = Path("data/bot_f_seen.json")
+          review_path = Path("data/bot_f_review_state.json")
+          seen = json.loads(seen_path.read_text()) if seen_path.exists() else []
+          review = json.loads(review_path.read_text()) if review_path.exists() else {}
+          assert isinstance(seen, list), f"seen cache has unexpected type: {type(seen).__name__}"
+          assert isinstance(review, dict), f"review cache has unexpected type: {type(review).__name__}"
+          print("default_branch_consolidated_cache_hit=" + str(bool(os.getenv("CURRENT_KEY"))).lower())
+          print("default_branch_legacy_seen_cache_hit=" + str(bool(os.getenv("SEEN_KEY"))).lower())
+          print("default_branch_legacy_review_cache_hit=" + str(bool(os.getenv("REVIEW_KEY"))).lower())
+          print(f"seen_entries={len(seen)} review_entries={len(review)}")
+          print(f"seen_bytes={seen_path.stat().st_size if seen_path.exists() else 0}")
+          print(f"review_bytes={review_path.stat().st_size if review_path.exists() else 0}")
+          print("PASS: any restored production cache uses the expected Bot F JSON schema")
+          PY
+
+  migrate-real-default-branch-state:
+    needs: inspect-default-branch-cache
+    runs-on: ubuntu-latest
+    outputs:
+      seen_sha: ${{ steps.manifest.outputs.seen_sha }}
+      review_sha: ${{ steps.manifest.outputs.review_sha }}
+      seen_count: ${{ steps.manifest.outputs.seen_count }}
+      review_count: ${{ steps.manifest.outputs.review_count }}
+    steps:
+      - name: Restore consolidated Bot F state from main if present
+        id: current
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/bot_f_seen.json
+            data/bot_f_review_state.json
+          key: bot-f-state-${{ runner.os }}-main-real-migration-probe-${{ github.run_id }}
+          restore-keys: |
+            bot-f-state-${{ runner.os }}-main-
+      - name: Restore actual legacy seen cache from main
+        if: steps.current.outputs.cache-matched-key == ''
+        uses: actions/cache/restore@v4
+        with:
+          path: data/bot_f_seen.json
+          key: bot-f-seen-${{ runner.os }}-main-real-migration-probe-${{ github.run_id }}
+          restore-keys: |
+            bot-f-seen-${{ runner.os }}-main-
+      - name: Restore actual legacy review cache from main
+        if: steps.current.outputs.cache-matched-key == ''
+        uses: actions/cache/restore@v4
+        with:
+          path: data/bot_f_review_state.json
+          key: bot-f-review-state-${{ runner.os }}-main-real-migration-probe-${{ github.run_id }}
+          restore-keys: |
+            bot-f-review-state-${{ runner.os }}-main-
+      - name: Validate and fingerprint actual restored state
+        id: manifest
+        run: |
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          seen_path = Path("data/bot_f_seen.json")
+          review_path = Path("data/bot_f_review_state.json")
+          seen = json.loads(seen_path.read_text())
+          review = json.loads(review_path.read_text())
+          assert isinstance(seen, list) and len(seen) > 0, "legacy seen state missing/invalid"
+          assert isinstance(review, dict) and len(review) > 0, "legacy review state missing/invalid"
+          seen_sha = hashlib.sha256(seen_path.read_bytes()).hexdigest()
+          review_sha = hashlib.sha256(review_path.read_bytes()).hexdigest()
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"seen_sha={seen_sha}\n")
+              output.write(f"review_sha={review_sha}\n")
+              output.write(f"seen_count={len(seen)}\n")
+              output.write(f"review_count={len(review)}\n")
+          print(f"PASS: actual main state restored: seen={len(seen)} review={len(review)}")
+          PY
+      # Writes only a unique cache in this PR branch namespace, never a main cache key.
+      - name: Save migrated real state under isolated PR-branch cache key
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            data/bot_f_seen.json
+            data/bot_f_review_state.json
+          key: bot-f-state-${{ runner.os }}-${{ github.ref_name }}-real-main-migration-canary-${{ github.run_id }}
+
+  verify-real-state-next-cycle:
+    needs: migrate-real-default-branch-state
+    runs-on: ubuntu-latest
+    steps:
+      - name: Restore migrated real state as a subsequent run would
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/bot_f_seen.json
+            data/bot_f_review_state.json
+          key: bot-f-state-${{ runner.os }}-${{ github.ref_name }}-real-main-migration-canary-${{ github.run_id }}
+      - name: Verify exact state survived the next-cycle restore
+        env:
+          EXPECTED_SEEN_SHA: ${{ needs.migrate-real-default-branch-state.outputs.seen_sha }}
+          EXPECTED_REVIEW_SHA: ${{ needs.migrate-real-default-branch-state.outputs.review_sha }}
+          EXPECTED_SEEN_COUNT: ${{ needs.migrate-real-default-branch-state.outputs.seen_count }}
+          EXPECTED_REVIEW_COUNT: ${{ needs.migrate-real-default-branch-state.outputs.review_count }}
+        run: |
+          python - <<'PY'
+          import hashlib, os
+          from pathlib import Path
+          seen_path = Path("data/bot_f_seen.json")
+          review_path = Path("data/bot_f_review_state.json")
+          assert hashlib.sha256(seen_path.read_bytes()).hexdigest() == os.environ["EXPECTED_SEEN_SHA"]
+          assert hashlib.sha256(review_path.read_bytes()).hexdigest() == os.environ["EXPECTED_REVIEW_SHA"]
+          print("PASS: actual main seen/review state restored byte-for-byte on simulated next cycle")
+          print(f"seen_entries={os.environ['EXPECTED_SEEN_COUNT']} review_entries={os.environ['EXPECTED_REVIEW_COUNT']}")
+          PY
+
+  seed-legacy-cache-fixtures:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create valid legacy state fixtures (production JSON schemas)
+        run: |
+          mkdir -p data
+          printf '%s\n' '["56:0x1111111111111111111111111111111111111111"]' > data/bot_f_seen.json
+          printf '%s\n' '{"56:0x2222222222222222222222222222222222222222":{"checked_at":"2026-11-15T00:00:00Z","status":"review","flags":["fixture"],"discovery_alert_sent":false}}' > data/bot_f_review_state.json
+      - name: Save legacy seen cache fixture
+        uses: actions/cache/save@v4
+        with:
+          path: data/bot_f_seen.json
+          key: bot-f-seen-${{ runner.os }}-${{ github.ref_name }}-canary-${{ github.run_id }}
+      - name: Save legacy review cache fixture
+        uses: actions/cache/save@v4
+        with:
+          path: data/bot_f_review_state.json
+          key: bot-f-review-state-${{ runner.os }}-${{ github.ref_name }}-canary-${{ github.run_id }}
+
+  migrate-and-test:
+    needs: seed-legacy-cache-fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Restore consolidated cache (expected miss on first cycle)
+        id: restore-state
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/bot_f_seen.json
+            data/bot_f_review_state.json
+          key: bot-f-state-${{ runner.os }}-${{ github.ref_name }}-canary-${{ github.run_id }}
+      - name: Restore legacy seen cache
+        if: steps.restore-state.outputs.cache-matched-key == ''
+        uses: actions/cache/restore@v4
+        with:
+          path: data/bot_f_seen.json
+          key: bot-f-seen-${{ runner.os }}-${{ github.ref_name }}-canary-${{ github.run_id }}
+      - name: Restore legacy review cache
+        if: steps.restore-state.outputs.cache-matched-key == ''
+        uses: actions/cache/restore@v4
+        with:
+          path: data/bot_f_review_state.json
+          key: bot-f-review-state-${{ runner.os }}-${{ github.ref_name }}-canary-${{ github.run_id }}
+      - name: Assert migrated data uses production schemas
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          seen = json.loads(Path("data/bot_f_seen.json").read_text())
+          review = json.loads(Path("data/bot_f_review_state.json").read_text())
+          assert isinstance(seen, list) and "56:0x1111111111111111111111111111111111111111" in seen, seen
+          record = review["56:0x2222222222222222222222222222222222222222"]
+          assert record["status"] == "review" and record["discovery_alert_sent"] is False, record
+          assert "checked_at" in record, record
+          print("PASS: both legacy states restored in Bot F production JSON formats")
+          PY
+      - name: Save consolidated cache
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            data/bot_f_seen.json
+            data/bot_f_review_state.json
+          key: bot-f-state-${{ runner.os }}-${{ github.ref_name }}-canary-${{ github.run_id }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies and pytest
+        run: pip install -r requirements.txt pytest
+      - name: Compile Bot F read-only modules
+        run: python -m py_compile app/run_bot_f.py app/new_launches.py app/alerts.py app/uncx_bsc_lock.py
+      - name: Test Bot F runner, retention and mocked Telegram delivery
+        run: python -m pytest tests/test_bot_f_runner.py tests/test_bot_f_hardening.py tests/test_telegram_delivery.py -q
+      - name: Upload migrated fixture state
+        uses: actions/upload-artifact@v4
+        with:
+          name: bot-f-operational-canary-migrated-state-${{ github.run_id }}
+          path: data/
+          if-no-files-found: error
+          retention-days: 7
+
+  verify-next-cycle:
+    needs: migrate-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Restore consolidated state on simulated next cycle
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/bot_f_seen.json
+            data/bot_f_review_state.json
+          key: bot-f-state-${{ runner.os }}-${{ github.ref_name }}-canary-${{ github.run_id }}
+      - name: Assert persistence and deduplication identity
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          seen = json.loads(Path("data/bot_f_seen.json").read_text())
+          review = json.loads(Path("data/bot_f_review_state.json").read_text())
+          assert "56:0x1111111111111111111111111111111111111111" in seen, seen
+          assert review["56:0x2222222222222222222222222222222222222222"]["status"] == "review", review
+          print("PASS: consolidated seen/review state restored on next cycle")
+          PY
+
+# Production main caches are read-only; real-state migration writes only to a unique PR-branch cache.
+# Synthetic tests never invoke app.run_bot_f, read production secrets, contact RPC/GeckoTerminal/GoPlus,
+# or send Telegram messages.

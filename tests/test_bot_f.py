@@ -285,7 +285,7 @@ class BotFScreeningTests(unittest.TestCase):
                     "base": {"symbol": "NEW", "name": "New Token", "address": address},
                     "quote": {"symbol": "USDC", "address": "0x" + "1" * 40},
                     "base_price_usd": "0.25", "quote_price_usd": "1",
-                    "dex": "Test DEX", "network": "eth",
+                    "dex": "Pancakeswap V2 (BSC)", "network": "bsc",
                 }
             fetch_pools.return_value = [pool("0x" + "2" * 40)]
             goplus.return_value = {
@@ -299,7 +299,7 @@ class BotFScreeningTests(unittest.TestCase):
                 "_root": directory,
                 "_env": {"goplus_enabled": True},
                 "launches": {
-                    "networks": ["eth", "base"], "quote_symbols": ["USDC"],
+                    "networks": ["bsc", "eth"], "quote_symbols": ["USDC"],
                     "min_pool_age_minutes": 5, "max_pool_age_hours": 48,
                     "min_liquidity_usd": 25000, "min_volume_24h_usd": 10000,
                     "min_txns_24h": 50, "min_holder_count": 10,
@@ -335,7 +335,7 @@ class BotFScreeningTests(unittest.TestCase):
                 "base": {"symbol": "POOF", "name": "Poof", "address": address},
                 "quote": {"symbol": "USDC", "address": "0x" + "1" * 40},
                 "base_price_usd": "0.00048", "quote_price_usd": "1",
-                "dex": "Uniswap V2", "network": "eth",
+                "dex": "Pancakeswap V2 (BSC)", "network": "bsc",
             }
             fetch_pools.return_value = [pool]
             goplus.return_value = {
@@ -351,7 +351,7 @@ class BotFScreeningTests(unittest.TestCase):
             cfg = {
                 "_root": directory, "_env": {"goplus_enabled": True},
                 "launches": {
-                    "networks": ["eth"], "quote_symbols": ["USDC"],
+                    "networks": ["bsc"], "quote_symbols": ["USDC"],
                     "min_pool_age_minutes": 5, "max_pool_age_hours": 48,
                     "min_liquidity_usd": 25000, "min_volume_24h_usd": 10000,
                     "min_txns_24h": 50, "min_holder_count": 10,
@@ -504,7 +504,7 @@ class BotFScreeningTests(unittest.TestCase):
                 "base": {"symbol": "NEW", "name": "New Token", "address": address},
                 "quote": {"symbol": "USDC", "address": "0x" + "1" * 40},
                 "base_price_usd": "0.25", "quote_price_usd": "1",
-                "dex": "Test DEX", "network": "eth",
+                "dex": "Pancakeswap V2 (BSC)", "network": "bsc",
             }
             fetch_pools.return_value = [pool]
             goplus.return_value = {
@@ -516,7 +516,7 @@ class BotFScreeningTests(unittest.TestCase):
             cfg = {
                 "_root": directory, "_env": {"goplus_enabled": True},
                 "launches": {
-                    "networks": ["eth"], "quote_symbols": ["USDC"],
+                    "networks": ["bsc"], "quote_symbols": ["USDC"],
                     "min_pool_age_minutes": 5, "max_pool_age_hours": 48,
                     "min_liquidity_usd": 25000, "min_volume_24h_usd": 10000,
                     "min_txns_24h": 50, "min_holder_count": 10,
@@ -528,7 +528,7 @@ class BotFScreeningTests(unittest.TestCase):
             alerts = scan_new_launches(cfg)
             self.assertEqual(alerts, [])
             self.assertEqual(_load_seen(Path(directory) / "data/seen.json"), set())
-            identity = "1:" + address
+            identity = "56:" + address
             state = _load_review_state(Path(directory) / "data/review.json")
             self.assertFalse(state[identity]["discovery_alert_sent"])
 
@@ -551,7 +551,7 @@ class BotFScreeningTests(unittest.TestCase):
                 "txns_24h": {"buys": 40, "sells": 35},
                 "base": {"symbol": "NEW", "address": "0x" + "2" * 40},
                 "quote": {"symbol": "USDC", "address": "0x" + "1" * 40},
-                "dex": "Test DEX", "network": "eth",
+                "dex": "Pancakeswap V2 (BSC)", "network": "bsc",
             }
             fetch_pools.return_value = [
                 dict(base, pool_id="eth_missing", liquidity_usd=None),
@@ -563,7 +563,7 @@ class BotFScreeningTests(unittest.TestCase):
             cfg = {
                 "_root": directory, "_env": {"goplus_enabled": True},
                 "launches": {
-                    "networks": ["eth"], "quote_symbols": ["USDC"],
+                    "networks": ["bsc"], "quote_symbols": ["USDC"],
                     "min_pool_age_minutes": 5, "max_pool_age_hours": 48,
                     "min_liquidity_usd": 25000, "min_volume_24h_usd": 10000,
                     "min_txns_24h": 50, "min_holder_count": 10,
@@ -578,7 +578,7 @@ class BotFScreeningTests(unittest.TestCase):
             self.assertEqual(payload["liquidity_classification_counts"], {
                 "below_minimum": 1, "missing": 1, "invalid": 1, "zero": 1, "passed": 1,
             })
-            group = payload["network_dex_summary"]["eth|Test DEX"]
+            group = payload["network_dex_summary"]["bsc|Pancakeswap V2 (BSC)"]
             self.assertEqual(group["pools"], 5)
             self.assertEqual(group["missing"], 1)
             self.assertEqual(group["zero"], 1)
@@ -602,7 +602,7 @@ class BotFScreeningTests(unittest.TestCase):
                     "base": {"symbol": "NEW", "name": "New Token", "address": "0x" + str(index) * 40},
                     "quote": {"symbol": "USDC", "address": "0x" + "1" * 40},
                     "base_price_usd": "0.25", "quote_price_usd": "1",
-                    "dex": "Test DEX", "network": "eth",
+                    "dex": "Pancakeswap V2 (BSC)", "network": "bsc",
                 }
             fetch_pools.return_value = [
                 make_pool(2, age=1), make_pool(3, liquidity=1),
@@ -611,7 +611,7 @@ class BotFScreeningTests(unittest.TestCase):
             cfg = {
                 "_root": directory, "_env": {"goplus_enabled": True},
                 "launches": {
-                    "networks": ["eth"], "quote_symbols": ["USDC"],
+                    "networks": ["bsc"], "quote_symbols": ["USDC"],
                     "min_pool_age_minutes": 5, "max_pool_age_hours": 48,
                     "min_liquidity_usd": 25000, "min_volume_24h_usd": 10000,
                     "min_txns_24h": 50, "min_holder_count": 10,

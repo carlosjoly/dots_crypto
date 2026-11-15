@@ -5,7 +5,7 @@ from app.run_bot_f import main
 class BotFStandaloneRunnerTests(unittest.TestCase):
     def setUp(self):
         self.cfg={"_root":"/tmp/dot-cripto-test","_env":{"telegram_bot_token":"test-token","telegram_chat_id":"123"},"launches":{"enabled":True,"seen_state_file":"data/bot_f_seen.json","review_state_file":"data/bot_f_review_state.json","review_recheck_minutes":30}}
-        self.alert={"symbol":"TEST","token_address":"0x"+"1"*40,"network":"bsc","chain_id":"56","pool_address":"0x"+"a"*40,"discovery_status":"ELEGÍVEL PARA WATCHLIST — NÃO É RECOMENDAÇÃO","goplus_status":"eligible_for_watchlist"}
+        self.alert={"symbol":"TEST","token_address":"0x"+"1"*40,"network":"bsc","chain_id":"56","pool_address":"0x"+"a"*40,"dex":"Pancakeswap V2 (BSC)","discovery_status":"ELEGÍVEL PARA WATCHLIST — NÃO É RECOMENDAÇÃO","goplus_status":"eligible_for_watchlist"}
         self.proof={"status":"verified","pool_address":self.alert["pool_address"]}
 
     @patch("app.run_bot_f.defer_lp_proof_review")

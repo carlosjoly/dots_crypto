@@ -1,0 +1,71 @@
+name: Bot F UNCX live validation
+
+on:
+  push:
+    branches:
+      - fix/bot-f-bsc-v2-gates-telemetry
+    paths:
+      - "app/verify_uncx_live.py"
+      - "app/uncx_bsc_lock.py"
+      - ".github/workflows/bot-f-uncx-live-validation.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "app/verify_uncx_live.py"
+      - "app/uncx_bsc_lock.py"
+      - ".github/workflows/bot-f-uncx-live-validation.yml"
+  workflow_dispatch:
+    inputs:
+      pool_address:
+        description: "BSC PancakeSwap V2 LP pair address (defaults to a real UNCX explorer pool)"
+        required: false
+        type: string
+        default: "0x0055731579f3ee9be56ae6077c01256716c53692"
+      lookback_blocks:
+        description: "Maximum BSC blocks to search for the UNCX onDeposit transaction"
+        required: false
+        type: string
+        default: "50000"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bot-f-uncx-live-validation
+  cancel-in-progress: false
+
+jobs:
+  validate-uncx:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Verify a real UNCX BSC PancakeSwap V2 pool (read-only)
+        env:
+          BOT_F_RPC_URL_BSC: ${{ secrets.BOT_F_RPC_URL_BSC }}
+          POOL_ADDRESS: ${{ github.event.inputs.pool_address || '0x0055731579f3ee9be56ae6077c01256716c53692' }}
+          LOOKBACK_BLOCKS: ${{ github.event.inputs.lookback_blocks || '50000' }}
+        run: |
+          python -m app.verify_uncx_live --pool-address "$POOL_ADDRESS" --lookback-blocks "$LOOKBACK_BLOCKS"
+      - name: Upload live verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bot-f-uncx-live-validation-${{ github.run_id }}
+          path: |
+            data/bot_f_uncx_live_validation.json
+            data/bot_f_uncx_live_validation.jsonl
+            data/bot_f_api_metrics.jsonl
+          if-no-files-found: warn
+          retention-days: 14

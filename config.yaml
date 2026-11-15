@@ -38,7 +38,9 @@ alerts:
 launches:
   enabled: true
   provider: "GeckoTerminal"
-  networks: ["eth", "base", "bsc", "arbitrum", "polygon_pos", "optimism", "avalanche"]
+  # Alert-eligible discovery is intentionally limited to the only reviewed on-chain adapter.
+  networks: ["bsc"]
+  alert_eligible_dexes: ["Pancakeswap V2 (BSC)"]
   min_pool_age_minutes: 5
   max_pool_age_hours: 48
   min_liquidity_usd: 25000

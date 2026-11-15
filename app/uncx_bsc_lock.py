@@ -68,16 +68,29 @@ def _decode_deposit_log(log):
     }
 
 
-def _find_deposit_transactions(rpc, pool_address, records, block_number, lookback_blocks):
-    """Link every active storage record to a successful onDeposit receipt."""
-    if int(lookback_blocks) < 1 or int(lookback_blocks) > 100000:
-        raise VerificationError("lookback de eventos fora do intervalo permitido")
-    topic = _deposit_event_topic(rpc)
-    start = max(0, int(block_number) - int(lookback_blocks))
-    end = int(block_number)
+def _block_at_or_before_timestamp(rpc, timestamp, latest_block):
+    """Binary-search BSC block timestamps to avoid scanning years of locker logs."""
+    low, high = 0, int(latest_block)
+    target = int(timestamp)
+    while low < high:
+        middle = (low + high + 1) // 2
+        block = rpc.call("eth_getBlockByNumber", [hex(middle), False])
+        if not isinstance(block, dict) or not block.get("timestamp"):
+            raise VerificationError("RPC não retornou timestamp durante a busca do bloco de lock")
+        block_timestamp = int(block["timestamp"], 16)
+        if block_timestamp <= target:
+            low = middle
+        else:
+            high = middle - 1
+    return low
+
+
+def _query_deposit_logs(rpc, topic, start_block, end_block):
+    """Fetch only a bounded block window, adapting to provider range limits."""
     logs = []
     chunk_size = 5000
-    cursor = start
+    cursor = int(start_block)
+    end = int(end_block)
     while cursor <= end:
         chunk_end = min(end, cursor + chunk_size - 1)
         try:
@@ -87,7 +100,10 @@ def _find_deposit_transactions(rpc, pool_address, records, block_number, lookbac
             }])
         except Exception as exc:
             message = str(exc).lower()
-            too_large = any(term in message for term in ("block range is too large", "range is too large", "query returned more than", "maximum block range"))
+            too_large = any(term in message for term in (
+                "block range is too large", "range is too large",
+                "query returned more than", "maximum block range",
+            ))
             if not too_large or chunk_size <= 100:
                 raise
             chunk_size = max(100, chunk_size // 2)
@@ -96,27 +112,56 @@ def _find_deposit_transactions(rpc, pool_address, records, block_number, lookbac
             raise VerificationError("eth_getLogs retornou formato inválido")
         logs.extend(batch)
         cursor = chunk_end + 1
+    return logs
 
+
+def _find_deposit_transactions(rpc, pool_address, records, block_number, lookback_blocks):
+    """Link active storage records to exact onDeposit receipts near their lock timestamps."""
+    lookback = int(lookback_blocks)
+    if lookback < 1 or lookback > 100000:
+        raise VerificationError("lookback de eventos fora do intervalo permitido")
+    if not records:
+        raise VerificationError("nenhum registro de lock ativo para vincular")
+    topic = _deposit_event_topic(rpc)
+    end = int(block_number)
     linked = []
     used = set()
     for record in records:
+        target_block = _block_at_or_before_timestamp(
+            rpc, int(record["lock_date"]), end
+        )
+        radius = min(128, lookback)
         matches = []
-        for log in logs:
-            if str(log.get("address", "")).lower() != UNCX_BSC_PANCAKE_V2_LOCKER:
-                continue
-            topics = log.get("topics") or []
-            if not topics or str(topics[0]).lower() != topic:
-                continue
-            decoded = _decode_deposit_log(log)
-            if (
-                decoded["lp_token"] == pool_address.lower()
-                and decoded["amount"] in (int(record["amount_raw"]), int(record["initial_amount_raw"]))
-                and decoded["lock_date"] == int(record["lock_date"])
-                and decoded["unlock_date"] == int(record["unlock_timestamp"])
-            ):
-                matches.append((log, decoded))
+        while True:
+            start = max(0, target_block - radius)
+            stop = min(end, target_block + radius)
+            logs = _query_deposit_logs(rpc, topic, start, stop)
+            matches = []
+            for log in logs:
+                if str(log.get("address", "")).lower() != UNCX_BSC_PANCAKE_V2_LOCKER:
+                    continue
+                topics = log.get("topics") or []
+                if not topics or str(topics[0]).lower() != topic:
+                    continue
+                decoded = _decode_deposit_log(log)
+                if (
+                    decoded["lp_token"] == pool_address.lower()
+                    and decoded["amount"] in (
+                        int(record["amount_raw"]), int(record["initial_amount_raw"])
+                    )
+                    and decoded["lock_date"] == int(record["lock_date"])
+                    and decoded["unlock_date"] == int(record["unlock_timestamp"])
+                ):
+                    matches.append((log, decoded))
+            if matches or radius >= lookback:
+                break
+            radius = min(lookback, radius * 4)
+
         if len(matches) != 1:
-            raise VerificationError("registro LP não possui evento onDeposit único correspondente")
+            raise VerificationError(
+                "registro LP não possui evento onDeposit único correspondente "
+                f"na janela de ±{radius} blocos"
+            )
         log, decoded = matches[0]
         tx_hash = str(log.get("transactionHash") or "").lower()
         if not re.fullmatch(r"0x[a-f0-9]{64}", tx_hash) or tx_hash in used:
@@ -145,8 +190,10 @@ def _find_deposit_transactions(rpc, pool_address, records, block_number, lookbac
             "lock_date": decoded["lock_date"],
             "event_unlock_date": decoded["unlock_date"],
             "lock_id": record["lock_id"],
+            "event_search_radius_blocks": radius,
         })
     return linked
+
 
 def verify_uncx_bsc_pancakeswap_v2_lock(
     pool_address,
@@ -254,6 +301,16 @@ def verify_uncx_bsc_pancakeswap_v2_lock(
             raise VerificationError("fração LP com lock ativo inferior a 99,9%")
         if not active_records:
             raise VerificationError("nenhum lock ativo com prazo futuro")
+        # Persist the on-chain custody facts even if event/receipt linkage later fails.
+        record.update({
+            "lp_total_supply_raw": str(total_supply),
+            "locker_lp_balance_raw": str(locker_balance),
+            "locked_lp_active_raw": str(locked_active),
+            "protected_fraction": protected_fraction,
+            "lock_records_total": len(all_records),
+            "lock_records_active": len(active_records),
+            "active_lock_ids": [entry["lock_id"] for entry in active_records],
+        })
         lock_transactions = _find_deposit_transactions(
             rpc, pool_address, active_records, block_number, lookback_blocks
         )
@@ -291,7 +348,7 @@ def verify_uncx_bsc_pancakeswap_v2_lock(
 
 def build_bsc_pancakeswap_v2_lp_proof(pool_address, rpc, allowed_factories=None,
                                       expected_locker_code_hash=None, audit_path=None,
-                                      liquidity_usd=None):
+                                      liquidity_usd=None, lookback_blocks=50000):
     """Combine independent pool/reserve proof with the specific UNCX LP lock."""
     snapshot = verify_v2_pool_reserves(
         "bsc", pool_address,
@@ -303,6 +360,7 @@ def build_bsc_pancakeswap_v2_lp_proof(pool_address, rpc, allowed_factories=None,
     lock = verify_uncx_bsc_pancakeswap_v2_lock(
         pool_address, rpc, expected_locker_code_hash, audit_path,
         block_number=snapshot.get("reserve_block_number"),
+        lookback_blocks=lookback_blocks,
     )
     if lock.get("status") != "lock_verified_transaction_linked":
         snapshot["reason"] = lock.get("reason") or "lock UNCX não verificado"
