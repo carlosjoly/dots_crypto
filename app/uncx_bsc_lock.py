@@ -301,6 +301,16 @@ def verify_uncx_bsc_pancakeswap_v2_lock(
             raise VerificationError("fração LP com lock ativo inferior a 99,9%")
         if not active_records:
             raise VerificationError("nenhum lock ativo com prazo futuro")
+        # Persist the on-chain custody facts even if event/receipt linkage later fails.
+        record.update({
+            "lp_total_supply_raw": str(total_supply),
+            "locker_lp_balance_raw": str(locker_balance),
+            "locked_lp_active_raw": str(locked_active),
+            "protected_fraction": protected_fraction,
+            "lock_records_total": len(all_records),
+            "lock_records_active": len(active_records),
+            "active_lock_ids": [entry["lock_id"] for entry in active_records],
+        })
         lock_transactions = _find_deposit_transactions(
             rpc, pool_address, active_records, block_number, lookback_blocks
         )
