@@ -36,7 +36,7 @@ class ContinuousTrendRuntimeTests(unittest.TestCase):
             store = TrendStateStore(Path(tmp) / "trend.json", confirmations=1)
             delivered = []
             with patch("app.main.get_klines", return_value=rising_candles()) as fetch:
-                with patch("app.main.emit_alert", side_effect=delivered.append):
+                with patch("app.main.emit_alert", side_effect=lambda _cfg, alert: delivered.append(alert)):
                     sent, failures = process_continuous_trend_monitor(cfg, "https://example.invalid", store)
             self.assertEqual(fetch.call_count, 6)
             self.assertEqual(sent, 6)
