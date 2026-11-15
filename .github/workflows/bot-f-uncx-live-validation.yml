@@ -8,6 +8,13 @@ on:
       - "app/verify_uncx_live.py"
       - "app/uncx_bsc_lock.py"
       - ".github/workflows/bot-f-uncx-live-validation.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "app/verify_uncx_live.py"
+      - "app/uncx_bsc_lock.py"
+      - ".github/workflows/bot-f-uncx-live-validation.yml"
   workflow_dispatch:
     inputs:
       pool_address:
