@@ -17,6 +17,16 @@ def _alert(agent, symbol, tf, row, signal, reason, confidence="não calibrada"):
         "execution_eligible": False,
     }
 
+
+def trend_slope_aligned(row, direction):
+    """Require both short- and medium-term averages to slope with the signal."""
+    if direction not in (-1, 1):
+        raise ValueError("direction must be -1 or 1")
+    short_slope = float(row.get("sma20_slope_3_pct", 0.0))
+    medium_slope = float(row.get("sma50_slope_5_pct", 0.0))
+    return short_slope * direction > 0 and medium_slope * direction > 0
+
+
 def run_market_agents(symbol, tf, df, cfg):
     return run_market_agents_enriched(symbol, tf, enrich(df), cfg)
 
@@ -107,8 +117,10 @@ def run_market_agents_enriched(symbol, tf, d, cfg):
         float(t.get("breakout_rsi_short_min", 25))
         <= float(r["rsi14"]) <= float(t.get("breakout_rsi_short_max", 50))
     )
-    bullish_regime = float(r["close"]) > float(r["sma20"]) > float(r["sma50"])
-    bearish_regime = float(r["close"]) < float(r["sma20"]) < float(r["sma50"])
+    bullish_regime = (float(r["close"]) > float(r["sma20"]) > float(r["sma50"])
+                      and trend_slope_aligned(r, 1))
+    bearish_regime = (float(r["close"]) < float(r["sma20"]) < float(r["sma50"])
+                      and trend_slope_aligned(r, -1))
     bullish_candle = float(r["close"]) > float(r["open"])
     bearish_candle = float(r["close"]) < float(r["open"])
     if (crossed_resistance and bullish_regime and bullish_candle
@@ -123,8 +135,8 @@ def run_market_agents_enriched(symbol, tf, d, cfg):
             and float(r["close"]) < float(prior["low"].min()) - breakout_buffer):
         out.append(_alert("Bot D — Rompimentos", symbol, tf, r, "possível rompimento de suporte",
                           f"Rompimento abaixo da mínima das {lookback} velas com tendência alinhada, candle vendedor, margem de {breakout_buffer:.8g} (0,10 ATR), volume relativo {rv:.2f}x e RSI={r['rsi14']:.1f}; experimental."))
-    trend_up = r["close"] > r["sma20"] > r["sma50"]
-    trend_down = r["close"] < r["sma20"] < r["sma50"]
+    trend_up = r["close"] > r["sma20"] > r["sma50"] and trend_slope_aligned(r, 1)
+    trend_down = r["close"] < r["sma20"] < r["sma50"] and trend_slope_aligned(r, -1)
     previous_trend_up = prev["close"] > prev["sma20"] > prev["sma50"]
     previous_trend_down = prev["close"] < prev["sma20"] < prev["sma50"]
     min_risk_reward = float(t.get("min_risk_reward", 1.5))
@@ -307,6 +319,8 @@ def diagnose_market_agents(symbol, tf, df, cfg, alerts=None):
             "bullish_breakout": {
                 "crossed_resistance": bool(crossed_resistance),
                 "bullish_regime": bool(r["close"] > r["sma20"] > r["sma50"]),
+                "short_slope_positive": bool(float(r.get("sma20_slope_3_pct", 0.0)) > 0),
+                "medium_slope_positive": bool(float(r.get("sma50_slope_5_pct", 0.0)) > 0),
                 "bullish_candle": bool(r["close"] > r["open"]),
                 "relative_volume": rv >= min_d_volume,
                 "breakout_clearance_atr": bool(crossed_resistance and r["close"] > prior["high"].max() + buffer),
@@ -315,6 +329,8 @@ def diagnose_market_agents(symbol, tf, df, cfg, alerts=None):
             "bearish_breakdown": {
                 "crossed_support": bool(crossed_support),
                 "bearish_regime": bool(r["close"] < r["sma20"] < r["sma50"]),
+                "short_slope_negative": bool(float(r.get("sma20_slope_3_pct", 0.0)) < 0),
+                "medium_slope_negative": bool(float(r.get("sma50_slope_5_pct", 0.0)) < 0),
                 "bearish_candle": bool(r["close"] < r["open"]),
                 "relative_volume": rv >= min_d_volume,
                 "breakout_clearance_atr": bool(crossed_support and r["close"] < prior["low"].min() - buffer),
@@ -324,6 +340,7 @@ def diagnose_market_agents(symbol, tf, df, cfg, alerts=None):
         record("Bot E — Swing trade", {
             "bullish_pullback_reclaim": {
                 "bullish_prior_trend": bool(prev["close"] > prev["sma50"] and prev["sma20"] > prev["sma50"]),
+                "trend_slopes_aligned": bool(trend_slope_aligned(r, 1)),
                 "pullback_to_sma20": bool(prev["low"] <= prev["sma20"]),
                 "confirmed_reclaim": bool(r["close"] > r["sma20"] > r["sma50"] and r["close"] > prev["high"]),
                 "rsi_range": float(t.get("swing_pullback_rsi_min", 45)) <= rsi <= float(t.get("swing_pullback_rsi_max", 65)),
@@ -331,6 +348,7 @@ def diagnose_market_agents(symbol, tf, df, cfg, alerts=None):
             },
             "bearish_retest_breakdown": {
                 "bearish_prior_trend": bool(prev["close"] < prev["sma50"] and prev["sma20"] < prev["sma50"]),
+                "trend_slopes_aligned": bool(trend_slope_aligned(r, -1)),
                 "retest_to_sma20": bool(prev["high"] >= prev["sma20"]),
                 "confirmed_breakdown": bool(r["close"] < r["sma20"] < r["sma50"] and r["close"] < prev["low"]),
                 "rsi_range": float(t.get("swing_pullback_short_rsi_min", 35)) <= rsi <= float(t.get("swing_pullback_short_rsi_max", 55)),
