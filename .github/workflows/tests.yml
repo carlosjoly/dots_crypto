@@ -36,3 +36,9 @@ jobs:
         run: python -m py_compile scripts/diagnose_uncx_bsc.py
       - name: Print Telegram message preview (no delivery)
         run: python preview_alert.py
+
+      - name: Probe LunarCrush free-tier access (PR #8 only; one read-only request)
+        if: github.event_name == 'pull_request' && github.event.pull_request.number == 8
+        env:
+          SOCIAL_API_KEY: ${{ secrets.SOCIAL_API_KEY }}
+        run: python scripts/lunarcrush_free_probe.py
