@@ -48,6 +48,11 @@ launches:
   enabled: true
   provider: "GeckoTerminal"
   # Alert-eligible discovery is intentionally limited to the only reviewed on-chain adapter.
+  # Discovery-only coverage: all supported GeckoTerminal networks.
+  # Only "networks" below can pass into GoPlus screening/alert eligibility.
+  discovery_networks: ["eth", "base", "bsc", "arbitrum", "polygon_pos", "optimism", "avalanche"]
+  discovery_max_pages: 2
+  # Alert-eligible networks remain restricted to the reviewed BSC adapter.
   networks: ["bsc"]
   alert_eligible_dexes: ["Pancakeswap V2 (BSC)"]
   min_pool_age_minutes: 5

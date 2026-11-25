@@ -239,6 +239,35 @@ def fetch_new_pools(network, page=1):
              network, gecko_network, len(pools))
     return pools
 
+def fetch_discovery_pools(network, max_pages=1):
+    """Collect a bounded number of GeckoTerminal pages and deduplicate exact pool IDs."""
+    page_limit = max(1, min(5, int(max_pages)))
+    collected = []
+    identities = set()
+    for page in range(1, page_limit + 1):
+        page_pools = fetch_new_pools(network, page=page)
+        if not page_pools:
+            log.info("Bot F paginação encerrada: rede=%s; página_vazia=%d.", network, page)
+            break
+        for pool in page_pools:
+            identity = str(pool.get("pool_id") or "").strip()
+            if not identity:
+                address = str(pool.get("pool_address") or "").strip().lower()
+                identity = f"{gecko_network_id(network)}:{address}" if address else ""
+            if identity and identity in identities:
+                continue
+            if identity:
+                identities.add(identity)
+            collected.append(pool)
+        log.info(
+            "Bot F página coletada: rede=%s; página=%d; pools_página=%d; pools_únicos=%d.",
+            network, page, len(page_pools), len(collected),
+        )
+        if page < page_limit:
+            time.sleep(REQUEST_INTERVAL_SECONDS)
+    return collected
+
+
 def fetch_current_pool_liquidity(network, pool_address):
     """Refresh the exact pool's reserve immediately before Telegram delivery."""
     address = str(pool_address or "").strip()
@@ -644,7 +673,12 @@ def scan_new_launches(cfg):
         access_token = get_goplus_access_token(env["goplus_app_key"], env["goplus_app_secret"])
 
     max_security_checks = max(0, int(settings["max_security_checks_per_cycle"]))
-    for network in settings["networks"]:
+    # Discovery coverage is intentionally broader than the networks/DEXs that
+    # have a reviewed on-chain adapter and may enter security screening.
+    discovery_networks = settings.get("discovery_networks") or settings["networks"]
+    alert_eligible_networks = set(settings.get("networks") or [])
+    max_discovery_pages = max(1, min(5, int(settings.get("discovery_max_pages", 1))))
+    for network in discovery_networks:
         network_slug = gecko_network_id(network)
         network_summary[network] = {
             "gecko_slug": network_slug, "pools": 0, "market_eligible": 0,
@@ -658,7 +692,7 @@ def scan_new_launches(cfg):
             log.warning("Bot F: rede sem mapeamento GoPlus, ignorada: %s", network)
             continue
         try:
-            pools = fetch_new_pools(network)
+            pools = fetch_discovery_pools(network, max_pages=max_discovery_pages)
             network_summary[network]["pools"] = len(pools)
             diagnostics["pools_received"] += len(pools)
             network_summary[network]["status"] = "collected"
@@ -708,7 +742,7 @@ def scan_new_launches(cfg):
                 str(value).strip().casefold()
                 for value in settings.get("alert_eligible_dexes", ["Pancakeswap V2 (BSC)"])
             }
-            if network != "bsc" or dex_name.strip().casefold() not in allowed_dexes:
+            if network not in alert_eligible_networks or dex_name.strip().casefold() not in allowed_dexes:
                 pool_record["market_filter_result"] = "unsupported_adapter"
                 pool_record["market_filter_reason"] = (
                     "sem adaptador on-chain habilitado para esta rede/DEX; "
